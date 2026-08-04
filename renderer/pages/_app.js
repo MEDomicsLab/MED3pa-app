@@ -5,6 +5,7 @@ import { ConfirmPopup } from "primereact/confirmpopup"
 import React, { useEffect, useState } from "react"
 import { ToastContainer } from "react-toastify"
 import AppShell from "../components/shell/appShell"
+import { NotificationContextProvider } from "../components/generalPurpose/notificationContext"
 import { DataContextProvider } from "../components/workspace/dataContext"
 import { MEDDataObject } from "../components/workspace/NewMedDataObject"
 import { WorkspaceProvider } from "../components/workspace/workspaceContext"
@@ -105,18 +106,20 @@ function App() {
         <title>MED3pa</title>
       </Head>
       <div style={{ height: "100%", width: "100%" }}>
-        <DataContextProvider globalData={globalData} setGlobalData={setGlobalData}>
-          <WorkspaceProvider
-            workspace={workspaceObject}
-            setWorkspace={setWorkspaceObject}
-            port={port}
-            setPort={setPort}
-            recentWorkspaces={recentWorkspaces}
-            setRecentWorkspaces={setRecentWorkspaces}
-          >
-            <AppShell />
-          </WorkspaceProvider>
-        </DataContextProvider>
+        <NotificationContextProvider>
+          <DataContextProvider globalData={globalData} setGlobalData={setGlobalData}>
+            <WorkspaceProvider
+              workspace={workspaceObject}
+              setWorkspace={setWorkspaceObject}
+              port={port}
+              setPort={setPort}
+              recentWorkspaces={recentWorkspaces}
+              setRecentWorkspaces={setRecentWorkspaces}
+            >
+              <AppShell />
+            </WorkspaceProvider>
+          </DataContextProvider>
+        </NotificationContextProvider>
         <ConfirmPopup />
         <ConfirmDialog />
         <ToastContainer position="bottom-right" autoClose={2000} limit={3} newestOnTop={false} closeOnClick pauseOnFocusLoss draggable pauseOnHover theme="light" />

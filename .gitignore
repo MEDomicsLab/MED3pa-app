@@ -45,3 +45,9 @@ graphify-out/
 
 !*.gitkeep
 .DS_Store
+
+# throwaway dir used by `npm run verify` so builds never touch the dev cache
+renderer/.next-verify
+
+# MED3pa checkpointer writes run artefacts here at runtime
+go_server/checkpoints/

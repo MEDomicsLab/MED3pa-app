@@ -1,46 +1,43 @@
 #!/bin/bash
-# Install MongoDB Community Edition on MacOS
-# https://docs.mongodb.com/manual/tutorial/install-mongodb-on-os-x/
-# Create a log file
-LOG_FILE=/tmp/medomics_postinstall.log
+# macOS pkg post-install: install this app's python requirements into the
+# bundled python environment.
+#
+# Adapted from MEDomicsLab. Two things had to change for the standalone app:
+#   - it looks for MED3pa.app (electron-builder productName), not MEDomics.app
+#   - the fallback no longer downloads MEDomicsLab's merged_requirements.txt
+#     from GitHub. That file lists the whole platform's dependencies and has
+#     nothing to do with MED3pa; the requirements shipped inside this bundle
+#     are the only correct source.
+LOG_FILE=/tmp/med3pa_postinstall.log
 
-# Default MEDomics configuration directory
+# Default configuration directory (shared convention with MEDomicsLab: ~/.medomics)
 MEDOMICS_DIR=~/.medomics
 
 # Name of the requirements file
 REQUIREMENTS_FILE=merged_requirements.txt
 
-# Function to locate the MEDomics installation path
-find_medomics_path() {
-    if [ -d "/Applications/MEDomics.app" ]; then
-        echo "/Applications/MEDomics.app"
-    elif [ -d "$HOME/Applications/MEDomics.app" ]; then
-        echo "$HOME/Applications/MEDomics.app"
+# Function to locate the MED3pa installation path
+find_med3pa_path() {
+    if [ -d "/Applications/MED3pa.app" ]; then
+        echo "/Applications/MED3pa.app"
+    elif [ -d "$HOME/Applications/MED3pa.app" ]; then
+        echo "$HOME/Applications/MED3pa.app"
     else
         echo ""
     fi
 }
 
-# Locate MEDomics installation path
-MEDOMICS_PATH=$(find_medomics_path)
+MED3PA_PATH=$(find_med3pa_path)
 
-if [ -z "$MEDOMICS_PATH" ]; then
-    echo "MEDomics installation not found." >>$LOG_FILE
-    echo "Postinstall script failed: MEDomics not installed." >>$LOG_FILE
-    # exit 1
-    # Debugging purposes : Get all the paths in Applications directory
+if [ -z "$MED3PA_PATH" ]; then
+    echo "MED3pa installation not found; cannot locate the bundled requirements." >>$LOG_FILE
     echo "Debug: Listing all applications in /Applications" >>$LOG_FILE
     ls -l /Applications >>$LOG_FILE
-    # Getting the requirements file from the git repository : https://raw.githubusercontent.com/MEDomicsLab/MEDomics/refs/heads/dev_autoupdater/pythonEnv/merged_requirements.txt
-    echo "Debug: Downloading requirements file from GitHub" >>$LOG_FILE
-    curl -fsSL https://raw.githubusercontent.com/MEDomicsLab/MEDomics/refs/heads/dev_autoupdater/pythonEnv/merged_requirements.txt -o "$HOME/Downloads/$REQUIREMENTS_FILE" >>$LOG_FILE 2>&1
-    echo "Debug: Requirements file downloaded to $HOME/Downloads/$REQUIREMENTS_FILE" >>$LOG_FILE
-    REQUIREMENTS_FULL_PATH="$HOME/Downloads/$REQUIREMENTS_FILE"
-else
-    # Construct the full requirements path
-    REQUIREMENTS_FULL_PATH="$MEDOMICS_PATH/Contents/Resources/pythonEnv/$REQUIREMENTS_FILE"
-
+    echo "Postinstall script aborted: install MED3pa.app first, then re-run." >>$LOG_FILE
+    exit 0
 fi
+
+REQUIREMENTS_FULL_PATH="$MED3PA_PATH/Contents/Resources/pythonEnv/$REQUIREMENTS_FILE"
 
 echo "Checking if $REQUIREMENTS_FULL_PATH exists" >>$LOG_FILE
 if [ -f "$REQUIREMENTS_FULL_PATH" ]; then

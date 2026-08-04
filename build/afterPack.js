@@ -19,7 +19,7 @@ exports.default = async function (context) {
     // Get current directory
     const currentPath = process.cwd()
     console.log("Current path:", currentPath)
-    const appPath = path.join(context.appOutDir, "MEDomics.app")
+    const appPath = path.join(context.appOutDir, "MED3pa.app") // must match productName in electron-builder.yml
     const mongodbModulePath = path.join(appPath, "Contents/Resources/app.asar.unpacked/node_modules/mongodb-client-encryption")
     const mongodbPath = path.join(mongodbModulePath, "prebuilds")
     const nativeBinaryPath = path.join(mongodbModulePath, "build/Release/mongocrypt.node")

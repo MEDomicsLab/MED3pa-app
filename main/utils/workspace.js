@@ -188,14 +188,23 @@ function createFolder(folderString) {
   }
 }
 
-// Function to create the .medomics directory and necessary files
+/**
+ * Name of the per-workspace directory holding this app's MongoDB config and data.
+ *
+ * Deliberately NOT ".medomics": MEDomicsLab writes its own mongod.conf there with
+ * its own port, and a workspace opened in both apps would have one overwrite the
+ * other's config — and both would write into the same dbPath. Keeping a separate
+ * directory lets the same folder be used by either app independently.
+ */
+export const APP_WORKSPACE_DIR = ".med3pa"
+
+// Function to create the .med3pa directory and necessary files
 export const createMedomicsDirectory = (directoryPath) => {
-  const medomicsDir = path.join(directoryPath, ".medomics")
+  const medomicsDir = path.join(directoryPath, APP_WORKSPACE_DIR)
   const mongoDataDir = path.join(medomicsDir, "MongoDBdata")
   const mongoConfigPath = path.join(medomicsDir, "mongod.conf")
 
   if (!fs.existsSync(medomicsDir)) {
-    // Create .medomicsDir
     fs.mkdirSync(medomicsDir)
   }
 

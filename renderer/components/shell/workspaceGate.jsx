@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from "react"
+import React, { useContext, useEffect, useState } from "react"
 import { ipcRenderer } from "electron"
+import { toast } from "react-toastify"
+import { WorkspaceContext } from "../workspace/workspaceContext"
 
 /**
  * @description Landing screen shown until a workspace folder has been chosen.
@@ -9,6 +11,7 @@ import { ipcRenderer } from "electron"
  * one is selected.
  */
 const WorkspaceGate = () => {
+  const { setWorkspace } = useContext(WorkspaceContext)
   const [recentWorkspaces, setRecentWorkspaces] = useState([])
 
   useEffect(() => {
@@ -19,9 +22,24 @@ const WorkspaceGate = () => {
 
   const openWorkspaceDialog = () => ipcRenderer.send("messageFromNext", "requestDialogFolder")
 
+  /**
+   * @description Open one of the recent workspaces.
+   *
+   * The folder-picker path goes through the main process, which pushes
+   * "setWorkingDirectoryInApp" back and lets _app.js store the result. Nothing
+   * emits that event here, so the workspace this call returns has to be applied
+   * to the context directly — otherwise the main process switches workspace and
+   * starts MongoDB while the UI sits on this screen, looking like a dead link.
+   */
   const openWorkspace = (workspacePath) => {
     ipcRenderer.invoke("updateWorkspace", workspacePath).then(() => {
-      ipcRenderer.invoke("setWorkingDirectory", workspacePath)
+      ipcRenderer.invoke("setWorkingDirectory", workspacePath).then((newWorkspace) => {
+        if (newWorkspace) {
+          setWorkspace({ ...newWorkspace })
+        } else {
+          toast.error(`Could not open ${workspacePath}`)
+        }
+      })
     })
   }
 

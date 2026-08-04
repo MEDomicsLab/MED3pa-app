@@ -5,7 +5,7 @@ const { MongoClient } = require("mongodb")
 const fs = require("fs")
 const Papa = require("papaparse")
 
-const uri = "mongodb://localhost:54017" // Remplacez par votre URI MongoDB
+const uri = "mongodb://localhost:54117" // must match mongoPort in medomics.dev.js
 const dbName = "data" // Remplacez par le nom de votre base de données
 
 let client

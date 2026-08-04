@@ -3,7 +3,6 @@ import axios from "axios"
 import os from "os"
 import serve from "electron-serve"
 import { createWindow } from "./helpers"
-import { installExtension, REACT_DEVELOPER_TOOLS } from "electron-extension-installer"
 import MEDconfig from "../medomics.dev"
 import { runServer, findAvailablePort } from "./utils/server"
 import { setWorkingDirectory, getRecentWorkspacesOptions, loadWorkspaces, createMedomicsDirectory, updateWorkspace, createWorkingDirectory } from "./utils/workspace"
@@ -742,12 +741,20 @@ app.on("window-all-closed", () => {
 })
 
 app.on("ready", async () => {
+  // React DevTools are a development-only convenience, so the installer is a
+  // devDependency and is required lazily: production builds prune it, and a
+  // missing module must never take the app down at startup.
   if (MEDconfig.useReactDevTools) {
-    await installExtension(REACT_DEVELOPER_TOOLS, {
-      loadExtensionOptions: {
-        allowFileAccess: true
-      }
-    })
+    try {
+      const { installExtension, REACT_DEVELOPER_TOOLS } = require("electron-extension-installer")
+      await installExtension(REACT_DEVELOPER_TOOLS, {
+        loadExtensionOptions: {
+          allowFileAccess: true
+        }
+      })
+    } catch (error) {
+      console.warn("Could not install React DevTools (set useReactDevTools to false to skip): ", error)
+    }
   }
   autoUpdater.checkForUpdatesAndNotify()
 })
@@ -798,7 +805,7 @@ function openWindowFromURL(url) {
 
 // Function to start MongoDB
 function startMongoDB(workspacePath) {
-  const mongoConfigPath = path.join(workspacePath, ".medomics", "mongod.conf")
+  const mongoConfigPath = path.join(workspacePath, ".med3pa", "mongod.conf") // see APP_WORKSPACE_DIR in main/utils/workspace.js
   if (fs.existsSync(mongoConfigPath)) {
     console.log("Starting MongoDB with config: " + mongoConfigPath)
     let mongod = getMongoDBPath()

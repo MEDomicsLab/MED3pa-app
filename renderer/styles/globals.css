@@ -155,6 +155,39 @@ body {
   padding: 0 10px 10px 28px;
 }
 
+/* ---- settings page (components/shell/settingsPage.jsx) ---- */
+
+.settingsTab .p-tabview-nav-link {
+  padding: 0.65rem !important;
+}
+
+.settingsTab .p-tabview-nav li.p-highlight .p-tabview-nav-link {
+  padding: 0.65rem !important;
+  background: #ffffff !important;
+  border-color: #095899 !important;
+  color: #095899 !important;
+}
+
+.settingsTab .p-tabview-nav .p-tabview-ink-bar {
+  background: #095899 !important;
+}
+
+.settings-user h5 {
+  font-size: 1rem;
+  margin-bottom: 0;
+}
+
+/* ---- notification overlay (components/generalPurpose/notificationOverlay.jsx) ---- */
+
+.notification-overlay {
+  max-width: 26rem;
+}
+
+.notification-card {
+  margin-bottom: 0.5rem;
+  font-size: 0.8rem;
+}
+
 /* ---- scrollbars ---- */
 
 ::-webkit-scrollbar {

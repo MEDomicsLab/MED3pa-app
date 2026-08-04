@@ -1,6 +1,6 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
-# MEDomics – MongoDB post-install script (deb)
+# MED3pa – MongoDB post-install script (deb)
 #
 # Downloads the official MongoDB tarball directly from fastdl.mongodb.org
 # so we no longer depend on apt repository GPG keys (which can rotate and
@@ -205,7 +205,7 @@ fi
 # Electron requires chrome-sandbox to be owned by root with mode 4755 (SUID).
 # Without this, launching from the GNOME application menu crashes with:
 #   FATAL:setuid_sandbox_host.cc - "chrome-sandbox is not configured correctly"
-SANDBOX_PATH="/opt/MEDomics/chrome-sandbox"
+SANDBOX_PATH="/opt/MED3pa/chrome-sandbox"
 if [ -f "$SANDBOX_PATH" ]; then
     if chown root:root "$SANDBOX_PATH" >>"$LOG_FILE" 2>&1 && chmod 4755 "$SANDBOX_PATH" >>"$LOG_FILE" 2>&1; then
         echo "chrome-sandbox SUID bit set on $SANDBOX_PATH" >>"$LOG_FILE"

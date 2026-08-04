@@ -20,12 +20,12 @@ Four layers, same as MEDomicsLab but with one module in each:
 Electron main (main/)          window, MongoDB lifecycle, Go server lifecycle, python env
         │  ipc
 Renderer (renderer/)           Next.js UI — the MED3pa pages + a thin app shell
-        │  HTTP :54288
+        │  HTTP :54388
 Go server (go_server/)         request dispatcher; spawns python scripts, streams progress
         │  stdin/stdout JSON
 Python (pythonCode/)           MED3pa analysis, model application, external-model import
         │
-MongoDB :54017                 datasets, models (GridFS), sessions, deployments, patients
+MongoDB :54117                 datasets, models (GridFS), sessions, deployments, patients
 ```
 
 Nothing talks to MED3pa directly from the UI: the renderer posts a JSON config to the Go
@@ -54,7 +54,7 @@ server, which runs the matching python script and pipes progress back.
 - **Go** 1.21+
 - **Python** 3.9–3.12
 - **MongoDB** — the app starts and stops `mongod` itself against a config it writes into
-  your workspace at `.medomics/mongod.conf` (port `54017`). It must be on your `PATH`, or
+  your workspace at `.medomics/mongod.conf` (port `54117`). It must be on your `PATH`, or
   installed through the app's installer helper.
 
 ### 2. Installing MED3pa
