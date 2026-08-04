@@ -1,0 +1,27 @@
+# MED3pa standalone app - python requirements
+#
+# The MED3pa library itself is NOT on PyPI. Install it from GitHub (below) or,
+# if you are developing against a local checkout, replace that line with:
+#     -e ../packages/MED3pa
+# See README.md > "Installing MED3pa".
+MED3pa @ git+https://github.com/MEDomicsLab/MED3pa.git@639b9c8fa8e249af3cf2613bf806e34bfcc10534
+
+# --- pulled in by MED3pa itself, pinned here so the env is reproducible ---
+checkpointer==2.1.0
+numpy>=1.21.0,<2.1.0
+pandas>=1.4.0,<3.0.0
+PyYAML>=5.4,<7.0
+matplotlib==3.9.2
+ray>=2.37.0
+relib==1.2.0
+scikit_learn>=1.0,<2.0
+scipy>=1.7,<2.0
+setuptools>=49.6.0,<70.0
+torch>=1.9.0,<3.0
+tqdm>=4.50.0,<5.0
+xgboost==2.1.1
+
+# --- needed by this app's own python layer ---
+pymongo==4.7.3          # med_libs/mongodb_utils.py, results persistence
+onnxruntime>=1.16.3     # med_libs/model_loading.py, ONNX base models
+joblib>=1.2.0           # pickle/joblib base models

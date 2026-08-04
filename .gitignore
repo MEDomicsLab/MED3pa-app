@@ -1,0 +1,47 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints
+
+# --- Node / Next.js / Electron ---
+node_modules
+.next
+app
+dist
+build/dist
+*.log
+
+# --- Go ---
+go_server/main
+go_server/main.exe
+go_executables/*
+!go_executables/.gitkeep
+
+# --- Bundled python environment ---
+python/*
+pythonEnv/env/
+
+# --- Local artefacts ---
+tmp
+.env
+*.env
+.vscode/
+.idea
+gh_token.txt
+path2condaenv_toDeleteInProd.txt
+pythonCode/local_dir/*
+graphify-out/
+
+!*.gitkeep
+.DS_Store
