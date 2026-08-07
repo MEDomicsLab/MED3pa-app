@@ -14,6 +14,7 @@ import { loadMEDDataObjects, updateGlobalData } from "../utilities/appUtils/glob
 // CSS
 import "bootstrap/dist/css/bootstrap.min.css"
 import "react-toastify/dist/ReactToastify.css"
+import "react-tooltip/dist/react-tooltip.css"
 
 // --primereact
 import "primeicons/primeicons.css"
