@@ -6,10 +6,11 @@
 # and every checkpointer 2.x release up to 2.6.1 declares Requires-Python >=3.12.
 # On 3.11 the install fails outright with "No matching distribution found".
 #
-# The MED3pa library is NOT on PyPI. Install it from GitHub (below) or, when
+# Install MED3pa or, when
 # developing against a local checkout, replace that line with an editable install:
 #     pip install -e ../packages/MED3pa
-MED3pa @ git+https://github.com/MEDomicsLab/MED3pa.git@639b9c8fa8e249af3cf2613bf806e34bfcc10534
+# MED3pa @ git+https://github.com/MEDomicsLab/MED3pa.git@639b9c8fa8e249af3cf2613bf806e34bfcc10534
+MED3pa==1.1.0a1
 
 # --- MED3pa's own dependencies, pinned to the combination that actually resolves ---
 # numpy is held at 1.26.4 because MED3pa requires <2.1.0. That in turn forces
@@ -20,7 +21,7 @@ scipy==1.11.4
 pandas==2.3.3
 scikit_learn==1.9.0
 matplotlib==3.9.2
-checkpointer==2.1.0
+checkpointer==1.2.0
 relib==1.2.0
 ray==2.56.1
 torch==2.12.1

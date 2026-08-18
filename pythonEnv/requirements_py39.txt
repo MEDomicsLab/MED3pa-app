@@ -59,7 +59,7 @@ setuptools==69.5.1       # MED3pa requires <70
 pycaret==3.1.0
 xgboost==2.1.1           # MED3pa pin; xgboost >=3.0 requires Python >=3.10
 joblib==1.2.0
-onnxruntime==1.16.3      # external model import
+onnxruntime==1.19.2      # external model import
 shap==0.44.1
 lightgbm==3.3.4
 pyod==1.1.0
@@ -116,6 +116,7 @@ protobuf==4.21.12
 #     -e git+https://github.com/MEDomicsLab/MED3pa.git@<sha>#egg=MED3pa
 # Its own pins (numpy<2.1, pandas<3, scikit_learn<2, scipy<2, setuptools<70,
 # torch<3, tqdm<5, xgboost==2.1.1, PyYAML<7) are all satisfied above.
+MED3pa==1.1.0a1
 
 # --- developer-only (settings_generator, not needed at runtime) --------------
 # dpath==2.1.6
