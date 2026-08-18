@@ -50,13 +50,11 @@ mac: # Added from package.json
     - zip
     - pkg
   notarize: true
+  # Only the Go server needs signing. The create_conda_env_* scripts MEDomicsLab
+  # listed here are developer tooling that is not shipped, and naming absent
+  # files makes notarization fail.
   binaries:
     - "Contents/Resources/go_executables/server_go"
-    - "Contents/Resources/pythonEnv/create_conda_env_linux.sh"
-    - "Contents/Resources/pythonEnv/create_conda_env_mac.sh"
-    - "Contents/Resources/pythonEnv/create_conda_env_win.bat"
-  #   # - "Contents/Resources/go_executables/server_go_win32.exe"
-  #   - "Contents/MacOS/MEDomicsLab"
 pkg: # Added from package.json
   isRelocatable: false
   scripts: "../build/pkg-scripts"

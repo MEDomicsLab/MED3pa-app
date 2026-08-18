@@ -1,33 +1,37 @@
 #!/usr/bin/env bash
 #
-# Build the conda environment for the MED3pa standalone app.
+# Build a conda environment for developing the MED3pa standalone app.
+#
+# NOTE: this script is a DEVELOPER convenience. The packaged app does not run it.
+# In production the app installs into its own bundled python with
+#   pip install -r pythonEnv/requirements.txt
+# driven by installRequiredPythonPackages() in main/utils/pythonEnv.js. Keep
+# requirements.txt correct; this script only wraps it in a conda env.
 #
 # Usage:
-#   bash pythonEnv/create_conda_env.sh [env_name] [path_to_local_MED3pa_checkout]
+#   bash pythonEnv/create_conda_env.sh [env_name] [python_version]
 #
-# With no second argument MED3pa is installed from GitHub at the pinned commit.
-# Pass a local checkout to get an editable install instead, which is what you
-# want when developing the MED3pa library alongside the app.
-#
-# Ordering matters here:
-#   1. numpy is installed and pinned BEFORE anything else, because installing
-#      MED3pa unpinned drags in numpy 2.x and scipy 1.18, which then conflicts
-#      with MED3pa's own numpy<2.1.0 requirement.
-#   2. scipy is pinned back to 1.11.4 afterwards for the same reason.
-#
-# Python 3.12 is required: MED3pa pins checkpointer==2.1.0, which declares
-# Requires-Python >=3.12.
+# Defaults to python 3.12, which is what the Windows build bundles. macOS and
+# Linux builds bundle python 3.9 — pass 3.9 to reproduce those.
 
 set -e
 
 ENV_NAME="${1:-med3pa_app}"
-MED3PA_LOCAL="${2:-}"
-MED3PA_GIT="git+https://github.com/MEDomicsLab/MED3pa.git@639b9c8fa8e249af3cf2613bf806e34bfcc10534"
+PYTHON_VERSION="${2:-3.12}"
 
+HERE="$(cd "$(dirname "$0")" && pwd)"
 CONDA="$(command -v conda || echo conda)"
 
-echo "==> Creating conda environment '$ENV_NAME' (python 3.12)"
-"$CONDA" create -n "$ENV_NAME" python=3.12 -y
+echo "==> Creating conda environment '$ENV_NAME' (python $PYTHON_VERSION)"
+"$CONDA" create -n "$ENV_NAME" "python=$PYTHON_VERSION" -y
+
+# conda ships OpenSSL 3.5.x by default. OpenSSL 3.5 changed the error reported at
+# end-of-data when parsing DER certificates from ASN1_R_HEADER_TOO_LONG to
+# ASN1_R_NOT_ENOUGH_DATA, and CPython 3.9's _ssl.c only recognises the old reason
+# as a clean EOF — so on Windows ssl.create_default_context() dies while loading
+# the cert store, and every pip download fails. Harmless on 3.12, required on 3.9.
+echo "==> Pinning OpenSSL to 3.0.x"
+"$CONDA" install -n "$ENV_NAME" "openssl=3.0.20" -y
 
 ENV_PREFIX="$("$CONDA" run -n "$ENV_NAME" python -c 'import sys, os; print(os.path.dirname(sys.executable))')"
 if [ -f "$ENV_PREFIX/python.exe" ]; then
@@ -37,23 +41,8 @@ else
 fi
 echo "==> Using interpreter: $PY"
 
-echo "==> Pinning numpy first"
-"$PY" -m pip install --no-cache-dir "numpy==1.26.4"
-
-if [ -n "$MED3PA_LOCAL" ]; then
-  echo "==> Installing MED3pa (editable) from $MED3PA_LOCAL"
-  "$PY" -m pip install --no-cache-dir -e "$MED3PA_LOCAL"
-else
-  echo "==> Installing MED3pa from GitHub at the pinned commit"
-  "$PY" -m pip install --no-cache-dir "MED3pa @ $MED3PA_GIT"
-fi
-
-echo "==> Installing the app's own dependencies"
-"$PY" -m pip install --no-cache-dir "pymongo==4.7.3" "onnxruntime==1.28.0" "joblib==1.5.3"
-
-echo "==> Restoring the numpy / scipy pins that MED3pa's install overrode"
-"$PY" -m pip install --no-cache-dir --force-reinstall "numpy==1.26.4"
-"$PY" -m pip install --no-cache-dir "scipy==1.11.4"
+echo "==> Installing requirements"
+"$PY" -m pip install --no-cache-dir -r "$HERE/requirements.txt"
 
 echo "==> Verifying"
 "$PY" -m pip check

@@ -1,27 +1,28 @@
 # MED3pa standalone app — python requirements
 #
-# Verified working set on Python 3.12 (see pythonEnv/create_conda_env.sh).
+# This is the file the PACKAGED APP installs from: installRequiredPythonPackages()
+# in main/utils/pythonEnv.js runs `pip install -r` against it inside the bundled
+# python. pythonEnv/create_conda_env.sh uses the same file for dev environments.
+# Anything added here ships to end users, so keep it minimal.
 #
-# Python 3.12 is REQUIRED, not merely supported: MED3pa pins checkpointer==2.1.0,
-# and every checkpointer 2.x release up to 2.6.1 declares Requires-Python >=3.12.
-# On 3.11 the install fails outright with "No matching distribution found".
-#
-# Install MED3pa or, when
-# developing against a local checkout, replace that line with an editable install:
-#     pip install -e ../packages/MED3pa
-# MED3pa @ git+https://github.com/MEDomicsLab/MED3pa.git@639b9c8fa8e249af3cf2613bf806e34bfcc10534
-MED3pa==1.1.0a1
+# Python version: the Windows build bundles CPython 3.12, macOS and Linux bundle
+# CPython 3.9. Everything pinned below resolves on both.
+MED3pa==1.1.0a2
 
-# --- MED3pa's own dependencies, pinned to the combination that actually resolves ---
-# numpy is held at 1.26.4 because MED3pa requires <2.1.0. That in turn forces
-# scipy: installing MED3pa unpinned pulls scipy 1.18, which requires numpy>=2.0
-# and breaks the install. scipy 1.11.4 is the last line that is happy on numpy 1.26.
+# checkpointer is deliberately NOT pinned here. MED3pa selects it itself, with a
+# python_version marker (it is skipped entirely below 3.12), and pinning it from
+# the outside is what produced the "unexpected keyword argument 'root_path'"
+# failure when the pin disagreed with the API the library actually calls.
+
+# --- MED3pa's own dependencies, pinned to the combination that resolves ---
+# numpy is held at 1.26.4 because MED3pa requires <2.1.0. That in turn constrains
+# scipy: an unpinned install pulls scipy 1.18, which requires numpy>=2.0 and
+# contradicts MED3pa. scipy 1.11.4 is the newest release happy on numpy 1.26.
 numpy==1.26.4
 scipy==1.11.4
 pandas==2.3.3
 scikit_learn==1.9.0
 matplotlib==3.9.2
-checkpointer==1.2.0
 relib==1.2.0
 ray==2.56.1
 torch==2.12.1
@@ -32,5 +33,7 @@ setuptools==69.5.1
 
 # --- needed by this app's own python layer ---
 pymongo==4.7.3          # med_libs/mongodb_utils.py, results persistence
-onnxruntime==1.28.0     # med_libs/model_loading.py, ONNX base models
+onnxruntime==1.28.0     # med_libs/model_loading.py, ONNX base models.
+                        # Must stay >=1.18: earlier releases cap at ONNX IR
+                        # version 9 and reject IR 10 models outright.
 joblib==1.5.3           # pickle/joblib base models

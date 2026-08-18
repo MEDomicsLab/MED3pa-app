@@ -4,7 +4,7 @@
 #
 # Adapted from MEDomicsLab. Two things had to change for the standalone app:
 #   - it looks for MED3pa.app (electron-builder productName), not MEDomics.app
-#   - the fallback no longer downloads MEDomicsLab's merged_requirements.txt
+#   - the fallback no longer downloads MEDomicsLab's requirements file
 #     from GitHub. That file lists the whole platform's dependencies and has
 #     nothing to do with MED3pa; the requirements shipped inside this bundle
 #     are the only correct source.
@@ -14,7 +14,7 @@ LOG_FILE=/tmp/med3pa_postinstall.log
 MEDOMICS_DIR=~/.medomics
 
 # Name of the requirements file
-REQUIREMENTS_FILE=merged_requirements.txt
+REQUIREMENTS_FILE=requirements.txt
 
 # Function to locate the MED3pa installation path
 find_med3pa_path() {
