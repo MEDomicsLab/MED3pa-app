@@ -79,8 +79,14 @@ console.log = function () {
 //**** AUTO-UPDATER ****//
 
 function sendStatusToWindow(text) {
+  // BrowserWindow has no showMessage method, so the previous call threw a
+  // TypeError from inside the autoUpdater "error" handler — which fires on every
+  // launch of a build without a publish feed, turning a harmless "no update
+  // configured" into an unhandled error. "log" is the channel the renderer
+  // already listens on.
+  log.info(text)
   if (mainWindow && mainWindow.webContents) {
-    mainWindow.showMessage(text)
+    mainWindow.webContents.send("log", text)
   }
 }
 
