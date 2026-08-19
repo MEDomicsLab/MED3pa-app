@@ -7,6 +7,26 @@ const util = require("util")
 const { execSync } = require("child_process")
 const exec = util.promisify(require("child_process").exec)
 
+// Bundled CPython, taken from one python-build-standalone release so every
+// platform lands on the same interpreter.
+//
+// 3.12 is a hard floor, not a preference: MED3pa uses typing.Self (PEP 673,
+// 3.11+) and PEP 604 `X | Y` unions evaluated at def time (3.10+), and it pins
+// checkpointer behind a `python_version >= "3.12"` marker. macOS and Linux used
+// to bundle 3.9.18, which could not import the library at all.
+const PYTHON_VERSION = "3.12.13"
+const PYTHON_BUILD_TAG = "20260623"
+const PYTHON_BUILD_BASE = `https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_BUILD_TAG}`
+
+/**
+ * @description Filename of the standalone CPython build for a platform triple
+ * @param {String} triple e.g. "x86_64-pc-windows-msvc"
+ * @returns {String} the release asset filename
+ */
+function pythonBuildFile(triple) {
+  return `cpython-${PYTHON_VERSION}+${PYTHON_BUILD_TAG}-${triple}-install_only.tar.gz`
+}
+
 /**
  * Recursively calculates the size of a directory in bytes.
  * @param {string} dir - The directory path.
@@ -404,8 +424,8 @@ export async function installBundledPythonExecutable(mainWindow) {
     // If the python executable is not installed, download the python executable
     if (process.platform == "win32") {
       // Download the python executable
-      let url = "https://github.com/astral-sh/python-build-standalone/releases/download/20260623/cpython-3.12.13+20260623-x86_64-pc-windows-msvc-install_only.tar.gz"
-      let outputFileName = "cpython-3.9.18+20240224-x86_64-pc-windows-msvc-shared-install_only.tar.gz"
+      let outputFileName = pythonBuildFile("x86_64-pc-windows-msvc")
+      let url = `${PYTHON_BUILD_BASE}/${outputFileName}`
 
       let downloadPromise = exec(`wget ${url} -O ${outputFileName}`, { shell: "powershell.exe" })
 
@@ -430,13 +450,13 @@ export async function installBundledPythonExecutable(mainWindow) {
       const { stdout: remove, stderr: removeErr } = await removePromise
     } else if (process.platform == "darwin") {
       // Download the right python executable (arm64 or x86_64)
+      // isArm64 is a boolean; the old code compared it to the string "arm64",
+      // which is never true, so Apple Silicon machines silently got the x86_64
+      // build and ran python under Rosetta.
       let isArm64 = process.arch === "arm64"
-      let file = "cpython-3.9.18+20240224-x86_64-apple-darwin-install_only.tar.gz"
-      if (isArm64 === "arm64") {
-        file = `cpython-3.9.18+20240224-aarch64-apple-darwin-install_only.tar.gz`
-      }
+      let file = pythonBuildFile(isArm64 ? "aarch64-apple-darwin" : "x86_64-apple-darwin")
 
-      let url = `https://github.com/indygreg/python-build-standalone/releases/download/20240224/${file}`
+      let url = `${PYTHON_BUILD_BASE}/${file}`
       let extractCommand = `tar -xvf ${file} -C ${pythonParentFolderExtractString}`
       let downloadPromise = exec(`/bin/bash -c "$(curl -fsSLO ${url})"`)
       execCallbacksForChildWithNotifications(downloadPromise.child, "Python Downloading", mainWindow)
@@ -454,20 +474,20 @@ export async function installBundledPythonExecutable(mainWindow) {
       const { stdout: remove, stderr: removeErr } = await removePromise
 
       // Install the required python packages
+      // requirements_mac.txt does not exist in this repo; every platform now
+      // installs the same requirements.txt.
       if (process.env.NODE_ENV === "production") {
-        installPythonPackage(mainWindow, pythonExecutablePath, null, path.join(process.resourcesPath, "pythonEnv", "requirements_mac.txt"))
+        installPythonPackage(mainWindow, pythonExecutablePath, null, path.join(process.resourcesPath, "pythonEnv", "requirements.txt"))
       } else {
-        installPythonPackage(mainWindow, pythonExecutablePath, null, path.join(process.cwd(), "pythonEnv", "requirements_mac.txt"))
+        installPythonPackage(mainWindow, pythonExecutablePath, null, path.join(process.cwd(), "pythonEnv", "requirements.txt"))
       }
     } else if (process.platform == "linux") {
-      // Download the right python executable (arm64 or x86_64)
-      // https://github.com/indygreg/python-build-standalone/releases/download/20240224/cpython-3.9.18+20240224-x86_64_v4-unknown-linux-gnu-install_only.tar.gz      let file = "cpython-3.9.18+20240224-x86_64_v4-unknown-linux-gnu-install_only.tar.gz"
-      let file = "cpython-3.9.18+20240224-x86_64_v3-unknown-linux-gnu-install_only.tar.gz"
-      if (process.arch === "arm64") {
-        file = "cpython-3.9.18+20240224-aarch64-unknown-linux-gnu-install_only.tar.gz"
-      }
+      // Download the right python executable (arm64 or x86_64).
+      // The baseline x86_64 build is used rather than the x86_64_v3 variant the
+      // old code picked: v3 requires AVX2, so it faults on older CPUs.
+      let file = pythonBuildFile(process.arch === "arm64" ? "aarch64-unknown-linux-gnu" : "x86_64-unknown-linux-gnu")
 
-      let url = `https://github.com/indygreg/python-build-standalone/releases/download/20240224/${file}`
+      let url = `${PYTHON_BUILD_BASE}/${file}`
 
       // Download the python executable
       let downloadPromise = exec(`wget ${url} -P ${pythonParentFolderExtractString}`)
