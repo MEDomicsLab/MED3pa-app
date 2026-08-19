@@ -59,21 +59,33 @@ server, which runs the matching python script and pipes progress back.
 
 ### 2. Installing MED3pa
 
-MED3pa is **not on PyPI**. `pythonEnv/requirements.txt` pins it to a GitHub commit:
+MED3pa is on PyPI and pinned in `pythonEnv/requirements.txt`. Note it is currently a
+pre-release, so the exact `==` pin is what makes pip accept it without `--pre`:
 
 ```bash
 pip install -r pythonEnv/requirements.txt
 ```
 
-If you are developing against a local checkout of the MED3pa library, replace that line in
-`pythonEnv/requirements.txt` with an editable install pointing at your clone, for example:
+Or build a conda environment in one step (python 3.12, OpenSSL pinned, requirements
+installed and verified):
+
+```bash
+bash pythonEnv/create_conda_env.sh med3pa_app 3.12
+```
+
+If you are developing against a local checkout of the MED3pa library, replace the `MED3pa==`
+line in `pythonEnv/requirements.txt` with an editable install pointing at your clone:
 
 ```bash
 pip install -e ../packages/MED3pa
 ```
 
-Note that the library's built-in-metric-by-name path is known to raise a `TypeError`; pass
-metric callables rather than strings if you hit it.
+**Python 3.12 is required**, not merely supported: MED3pa uses `typing.Self` (3.11+) and PEP
+604 `X | Y` unions, and pins `checkpointer` behind a `python_version >= "3.12"` marker.
+
+Note that the library's built-in-metric-by-name path is known to raise a `TypeError`; the app
+resolves metrics through `modules/med3pa/confidence_metrics.py` rather than passing a bare
+name, so this only matters if you call MED3pa directly.
 
 ### 3. Install and run
 
@@ -134,6 +146,28 @@ native dependency).
 
 ---
 
+## Releasing
+
+Releases are built by `.github/workflows/automaticBuildingWin.yml`, triggered by pushing a tag
+that starts with `w`. The tag minus its leading `w` becomes the version in `package.json`, so
+the tag is the single source of truth:
+
+```bash
+git tag w0.1.0-alpha.1 && git push origin w0.1.0-alpha.1
+```
+
+The workflow builds the Go server, packages the app with electron-builder, and opens a
+**draft** pre-release with the installer and a zip of the python environment files attached.
+Nothing is public until you review it and press Publish.
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+---
+
 ## License
 
-Inherits the license of the MEDomicsLab project.
+[GPL-3.0](LICENSE), the same license as the MEDomicsLab project this was extracted from.
