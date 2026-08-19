@@ -7,7 +7,7 @@
 #
 # Python version: the Windows build bundles CPython 3.12, macOS and Linux bundle
 # CPython 3.9. Everything pinned below resolves on both.
-MED3pa==1.1.0a2
+MED3pa==1.1.0a3
 
 # checkpointer is deliberately NOT pinned here. MED3pa selects it itself, with a
 # python_version marker (it is skipped entirely below 3.12), and pinning it from
