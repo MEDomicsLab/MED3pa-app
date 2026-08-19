@@ -24,10 +24,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Node 22, not the 18.13 MEDomicsLab pins. electron-builder's app-builder-lib
+      # require()s @noble/hashes, which is pure ESM at 2.x; require() of an ES
+      # module only works from Node 22.12+/20.19+, so on 18.13 packaging dies with
+      # ERR_REQUIRE_ESM before producing an installer.
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18.13
+          node-version: 22
 
       - name: Write the tag into package.json
         shell: bash
@@ -39,8 +43,10 @@ jobs:
       - name: Print package.json
         run: Get-Content package.json
 
+      # npm ci installs exactly what package-lock.json pins, so CI resolves the
+      # same tree that was verified locally instead of re-resolving on its own.
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Setup Go
         uses: actions/setup-go@v4
