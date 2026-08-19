@@ -29,7 +29,6 @@
     "electron-updater": "^6.3.9",
     "fs-extra": "^11.2.0",
     "mongodb": "^6.6.2",
-    "mongodb-client-encryption": "^6.1.0",
     "papaparse": "^5.4.1",
     "primeicons": "^7.0.0",
     "primereact": "^9.6.2",

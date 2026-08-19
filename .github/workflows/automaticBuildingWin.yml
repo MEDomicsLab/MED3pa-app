@@ -47,8 +47,10 @@ jobs:
         with:
           go-version: 1.21
 
-      - name: Prebuild libmongocrypt
-        run: bash ./utilScripts/libmongocrypt_prebuild.sh
+      # MEDomicsLab compiles libmongocrypt here so mongodb-client-encryption ships
+      # a native binary matching Electron's ABI. This app never enables CSFLE --
+      # it opens a plain local MongoClient -- so the dependency was dropped and
+      # the compile step with it.
 
       # build:win runs build_preparation_win.bat, which builds the Go server into
       # go_executables/ before invoking electron-builder.

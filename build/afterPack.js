@@ -44,6 +44,10 @@ exports.default = async function (context) {
       }
     } else if (fs.existsSync(nativeBinaryPath)) {
       console.log(`AfterPack: Using existing native binary ${nativeBinaryPath}`)
+    } else if (!fs.existsSync(mongodbModulePath)) {
+      // Expected: this app does not depend on mongodb-client-encryption, since
+      // it never enables client-side field level encryption.
+      console.log("AfterPack: mongodb-client-encryption not bundled, nothing to do")
     } else {
       throw new Error(`Neither prebuild tarballs nor native binary found for mongodb-client-encryption under ${mongodbModulePath}`)
     }
