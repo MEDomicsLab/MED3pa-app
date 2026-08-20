@@ -39,10 +39,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # Stop electron-builder searching the runner keychain for a signing
-      # identity it will not find. Without this the mac build can hang or fail
-      # instead of producing an unsigned .dmg.
-      CSC_IDENTITY_AUTO_DISCOVERY: false
+      # No CSC_IDENTITY_AUTO_DISCOVERY here on purpose: electron-builder.yml sets
+      # mac.identity to "-" (ad-hoc), which is handled explicitly, so there is no
+      # keychain search to suppress.
 
     steps:
       - name: Checkout code

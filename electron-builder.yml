@@ -45,11 +45,16 @@ mac:
   # app has no such credentials, so:
   #   - notarize must be false: notarization REQUIRES a Developer ID certificate
   #     and fails outright without one
-  #   - hardenedRuntime is pointless unsigned, and can break launching
-  #   - identity: null tells electron-builder to stop hunting for a certificate
-  # Users get a Gatekeeper warning and must allow the app once under
+  #   - identity "-" is AD-HOC signing: no certificate, no cost, but a real
+  #     signature. Required, not optional: arm64 binaries must be signed to run
+  #     at all, and macOS reports a wholly unsigned one as "damaged and can't be
+  #     opened". identity: null means "skip signing" and breaks Apple Silicon.
+  #   - hardenedRuntime must stay false alongside ad-hoc signing, or library
+  #     validation rejects Electron's own pre-signed framework (different Team
+  #     ID) and the app will not launch.
+  # Users still get a Gatekeeper warning and must allow the app once under
   # System Settings > Privacy & Security > "Open Anyway". See README.
-  identity: null
+  identity: "-"
   hardenedRuntime: false
   gatekeeperAssess: false
   category: "public.app-category.developer-tools"

@@ -148,8 +148,8 @@ native dependency).
 
 ## Installing on macOS
 
-The macOS build is **unsigned** — it is not notarized by Apple, because that requires a paid
-Developer ID certificate. macOS will refuse to open it on the first attempt.
+The macOS build is **ad-hoc signed but not notarized**, because notarization requires a paid
+Apple Developer ID certificate. macOS will refuse to open it on the first attempt.
 
 To allow it once:
 
@@ -160,6 +160,13 @@ To allow it once:
 
 The old right-click → Open shortcut was removed in macOS 15 (Sequoia); the Settings route above
 is the current one. This is only needed on first launch.
+
+If instead you see **"MED3pa is damaged and can't be opened"**, that is a different problem: the
+app reached you without a valid signature. Strip the download quarantine flag and relaunch:
+
+```bash
+xattr -cr /Applications/MED3pa.app
+```
 
 The build is compiled on an Apple Silicon runner, so it targets **arm64**. Intel Macs are not
 currently covered.
