@@ -146,19 +146,42 @@ native dependency).
 
 ---
 
+## Installing on macOS
+
+The macOS build is **unsigned** — it is not notarized by Apple, because that requires a paid
+Developer ID certificate. macOS will refuse to open it on the first attempt.
+
+To allow it once:
+
+1. Open the `.dmg` and drag MED3pa to Applications
+2. Launch it — macOS blocks it and says the developer cannot be verified
+3. Go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway**
+4. Launch again and confirm
+
+The old right-click → Open shortcut was removed in macOS 15 (Sequoia); the Settings route above
+is the current one. This is only needed on first launch.
+
+The build is compiled on an Apple Silicon runner, so it targets **arm64**. Intel Macs are not
+currently covered.
+
+---
+
 ## Releasing
 
-Releases are built by `.github/workflows/automaticBuildingWin.yml`, triggered by pushing a tag
-that starts with `w`. The tag minus its leading `w` becomes the version in `package.json`, so
-the tag is the single source of truth:
+Releases are built by `.github/workflows/release.yml`, triggered by pushing a tag that starts
+with `v`. The tag minus its leading `v` becomes the version in `package.json`, so the tag is
+the single source of truth:
 
 ```bash
-git tag w0.1.0-alpha.1 && git push origin w0.1.0-alpha.1
+git tag v0.1.0-alpha.1 && git push MED3paApp v0.1.0-alpha.1
 ```
 
-The workflow builds the Go server, packages the app with electron-builder, and opens a
-**draft** pre-release with the installer and a zip of the python environment files attached.
-Nothing is public until you review it and press Publish.
+That one tag builds all three platforms in parallel — Windows, Linux and macOS — and collects
+them into a **single draft pre-release**: `.exe`, `.deb`, `.dmg`, plus a zip of the python
+environment files. Nothing is public until you review it and press Publish.
+
+A GitHub release is keyed on its tag, so all platforms must build from the *same* tag. Using a
+separate tag per platform produces a separate release each time.
 
 ---
 

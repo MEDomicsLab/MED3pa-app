@@ -39,25 +39,25 @@ extraResources: # Add this section if it doesn't exist, or add the line to it
       - "!**/.git/**"
 
 extends: null # Added from package.json
-mac: # Added from package.json
-  hardenedRuntime: true
+mac:
+  # UNSIGNED build. MEDomicsLab signs and notarizes with a paid Apple Developer
+  # account (CSC_LINK, APPLE_ID, APPLE_TEAM_ID and friends as repo secrets); this
+  # app has no such credentials, so:
+  #   - notarize must be false: notarization REQUIRES a Developer ID certificate
+  #     and fails outright without one
+  #   - hardenedRuntime is pointless unsigned, and can break launching
+  #   - identity: null tells electron-builder to stop hunting for a certificate
+  # Users get a Gatekeeper warning and must allow the app once under
+  # System Settings > Privacy & Security > "Open Anyway". See README.
+  identity: null
+  hardenedRuntime: false
   gatekeeperAssess: false
-  entitlements: "build/entitlements.mac.plist"
-  entitlementsInherit: "build/entitlements.mac.plist"
   category: "public.app-category.developer-tools"
+  # dmg only. An unsigned .pkg installer is treated far more harshly by macOS
+  # than an unsigned .dmg, and the pkg target also pulls in build/pkg-scripts.
   target:
     - dmg
-    - zip
-    - pkg
-  notarize: true
-  # Only the Go server needs signing. The create_conda_env_* scripts MEDomicsLab
-  # listed here are developer tooling that is not shipped, and naming absent
-  # files makes notarization fail.
-  binaries:
-    - "Contents/Resources/go_executables/server_go"
-pkg: # Added from package.json
-  isRelocatable: false
-  scripts: "../build/pkg-scripts"
+  notarize: false
 win: # Added from package.json
   target: nsis
   icon: "app/assets/icon.ico"

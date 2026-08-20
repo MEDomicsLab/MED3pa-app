@@ -11,7 +11,11 @@ exports.default = async function (context) {
   require("dotenv").config()
   const DEVELOPER_ID = process.env.DEVELOPER_ID_APP
   if (!DEVELOPER_ID) {
-    throw new Error("DEVELOPER_ID environment variable is not set")
+    // Expected for unsigned builds. electron-builder.yml sets identity: null and
+    // notarize: false, so there is no certificate to sign the native module with
+    // and nothing for this hook to do. Throwing here would fail the whole build.
+    console.log("AfterPack: DEVELOPER_ID_APP not set, skipping (unsigned build)")
+    return
   }
 
   try {

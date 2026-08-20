@@ -1,0 +1,140 @@
+name: Build and publish release
+#
+# ONE tag builds every platform and produces ONE release:
+#     git tag v0.1.0-alpha.1 && git push MED3paApp v0.1.0-alpha.1
+#
+# This replaces the per-platform workflows. Those used separate tag prefixes
+# (w* / u* / m*), and since a GitHub release is keyed on its TAG, each prefix
+# produced its own release rather than adding assets to a shared one.
+#
+# Two ideas do the work here:
+#   - `strategy.matrix` runs the same job once per entry, on a different runner
+#   - `needs: [build]` makes publish wait for all of them, so exactly one
+#     release is created no matter how many platforms built
+on:
+  push:
+    tags:
+      - "v*"
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # fail-fast: false so a broken mac build does not cancel a working linux one.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: build:win
+          - os: ubuntu-latest
+            script: build:linux
+          # macOS builds UNSIGNED (electron-builder.yml: identity null,
+          # notarize false). Users must allow it once under System Settings >
+          # Privacy & Security. To ship a signed build instead, add the Apple
+          # secrets and restore notarize: true.
+          - os: macos-latest
+            script: build:mac
+
+    runs-on: ${{ matrix.os }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Stop electron-builder searching the runner keychain for a signing
+      # identity it will not find. Without this the mac build can hang or fail
+      # instead of producing an unsigned .dmg.
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Node 22, not 18: electron-builder require()s @noble/hashes, which is pure
+      # ESM at 2.x, and require() of an ES module needs Node 22.12+/20.19+.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: 1.21
+
+      # The tag is the version. Strip the leading "v" and write the rest into
+      # package.json, which is what electron-builder names artifacts from.
+      - name: Write the tag into package.json
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          node -p "let pkg=require('./package.json'); pkg.version='$VERSION'; require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));"
+
+      # npm ci installs exactly what package-lock.json pins, so CI resolves the
+      # same tree that was verified locally instead of re-resolving on its own.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run ${{ matrix.script }}
+
+      - name: List build output
+        shell: bash
+        run: ls -la ./build/dist
+
+      # upload-artifact v4 requires a unique name per artifact, hence the os
+      # suffix. The glob picks up whichever installer this platform produced.
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.os }}
+          path: |
+            ./build/dist/MED3pa-*.exe
+            ./build/dist/MED3pa-*.deb
+            ./build/dist/MED3pa-*.dmg
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # No `name:` means "download every artifact", each into its own subfolder.
+      - name: Download all installers
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Zip the python environment files
+        run: |
+          sudo apt-get install -y zip
+          zip -j MED3pa-PythonEnv.zip ./pythonEnv/requirements.txt ./pythonEnv/create_conda_env.sh
+
+      - name: List what will be attached
+        run: ls -laR dist && ls -la MED3pa-PythonEnv.zip
+
+      - name: Publish draft release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/**/MED3pa-*
+            MED3pa-PythonEnv.zip
+          name: MED3pa ${{ steps.version.outputs.VERSION }}
+          body: |
+            MED3pa standalone application — ${{ steps.version.outputs.VERSION }}
+
+            On first launch the app downloads a bundled CPython 3.12 and installs
+            `pythonEnv/requirements.txt` into it; the System page shows that
+            progress. MongoDB must be on PATH or installed through the
+            first-time setup dialog.
+
+            ${{ github.ref }}
+          draft: true
+          prerelease: true
+          token: ${{ secrets.GITHUB_TOKEN }}
