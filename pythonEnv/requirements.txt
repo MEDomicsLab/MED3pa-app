@@ -5,8 +5,13 @@
 # python. pythonEnv/create_conda_env.sh uses the same file for dev environments.
 # Anything added here ships to end users, so keep it minimal.
 #
-# Python version: the Windows build bundles CPython 3.12, macOS and Linux bundle
-# CPython 3.9. Everything pinned below resolves on both.
+# Python version: every platform bundles the same CPython 3.12 standalone build
+# (see PYTHON_VERSION in main/utils/pythonEnv.js). Everything pinned below
+# resolves on it.
+#
+# Keep the format simple: one `name==version` per line. The app's own
+# checkPythonRequirements() parses this file to decide whether the setup is
+# complete, and it only understands `==` pins and `#` comments.
 MED3pa==1.1.0a3
 
 # checkpointer is deliberately NOT pinned here. MED3pa selects it itself, with a

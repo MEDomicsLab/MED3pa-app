@@ -63,6 +63,10 @@ var path = require("path")
 const util = require("util")
 const exec = util.promisify(require("child_process").exec)
 
+// Downloads and tar output overflow exec's 1 MB default buffer, which kills the
+// child part-way through.
+const EXEC_OPTIONS = { maxBuffer: 256 * 1024 * 1024 }
+
 export const checkRequirements = async () => {
   // Check if .medomics directory exists
   let medomicsDirExists = fs.existsSync(path.join(app.getPath("home"), ".medomics"))
@@ -81,36 +85,79 @@ export const installMongoDB = async () => {
   if (process.platform === "win32") {
     // Download MongoDB installer
     const downloadUrl = "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-7.0.12-signed.msi"
-    const downloadPath = path.join(app.getPath("downloads"), "mongodb-windows-x86_64-7.0.12-signed.msi")
-    let downloadMongoDBPromise = exec(`curl -o ${downloadPath} ${downloadUrl}`)
+    // The download folder is quoted throughout: it sits under the user profile,
+    // which routinely contains a space.
+    const downloadDir = app.getPath("downloads")
+    fs.mkdirSync(downloadDir, { recursive: true })
+    const downloadPath = path.join(downloadDir, "mongodb-windows-x86_64-7.0.12-signed.msi")
+    // -f so an HTTP error is a failed download rather than an error page saved
+    // under the .msi name.
+    let downloadMongoDBPromise = exec(`curl -fsSL --retry 3 --retry-delay 2 -o "${downloadPath}" "${downloadUrl}"`, EXEC_OPTIONS)
     execCallbacksForChildWithNotifications(downloadMongoDBPromise.child, "Downloading MongoDB installer", mainWindow)
     await downloadMongoDBPromise
     // Install MongoDB
     // msiexec.exe /l*v mdbinstall.log /qb /i mongodb-windows-x86_64-7.0.12-signed.msi ADDLOCAL="ServerNoService" SHOULD_INSTALL_COMPASS="0"
-    let installMongoDBPromise = exec(`msiexec.exe /l*v mdbinstall.log /qb /i ${downloadPath} ADDLOCAL="ServerNoService" SHOULD_INSTALL_COMPASS="0"`)
+    let installMongoDBPromise = exec(`msiexec.exe /l*v mdbinstall.log /qb /i "${downloadPath}" ADDLOCAL="ServerNoService" SHOULD_INSTALL_COMPASS="0"`, EXEC_OPTIONS)
     execCallbacksForChildWithNotifications(installMongoDBPromise.child, "Installing MongoDB", mainWindow)
     await installMongoDBPromise
 
-    let removeMongoDBInstallerPromise = exec(`rm ${downloadPath}`, { shell: "powershell" })
-    execCallbacksForChildWithNotifications(removeMongoDBInstallerPromise.child, "Removing MongoDB installer", mainWindow)
-    await removeMongoDBInstallerPromise
+    fs.rmSync(downloadPath, { force: true })
+    mainWindow &&
+      !mainWindow.isDestroyed() &&
+      mainWindow.webContents.send("notification", {
+        id: "Removing MongoDB installer",
+        message: "Removing MongoDB installer exited with code 0",
+        header: "Removing MongoDB installer Finished"
+      })
 
     return getMongoDBPath() !== null
   } else if (process.platform === "darwin") {
-    // Check if Homebrew is installed
-    let isBrewInstalled = await checkIsBrewInstalled()
-    if (!isBrewInstalled) {
-      await installBrew()
-    }
-    // Check if Xcode Command Line Tools are installed
-    let isXcodeSelectInstalled = await checkIsXcodeSelectInstalled()
-    if (!isXcodeSelectInstalled) {
-      await installXcodeSelect()
+    // The official tarball is used instead of Homebrew. getMongoDBPath() only
+    // ever looks in ~/.medomics/mongodb on macOS, so a brew install could never
+    // be detected and the first-setup modal waited on it forever. Homebrew also
+    // has to be present, prompts for a sudo password no one can type from here,
+    // and the formula that was requested (mongodb-community@7.0.12) does not
+    // exist — the tap only publishes major.minor formulas.
+    const medomicsPath = path.join(process.env.HOME, ".medomics")
+    const mongoPath = path.join(medomicsPath, "mongodb")
+    const architecture = process.arch === "arm64" ? "arm64" : "x86_64"
+    const mongoDBVersion = "8.0.9"
+    const archiveName = `mongodb-macos-${architecture}-${mongoDBVersion}.tgz`
+    const archivePath = path.join(medomicsPath, archiveName)
+    const downloadUrl = `https://fastdl.mongodb.org/osx/${archiveName}`
+
+    try {
+      fs.mkdirSync(medomicsPath, { recursive: true })
+      if (fs.existsSync(archivePath)) {
+        fs.rmSync(archivePath, { force: true })
+      }
+
+      let downloadMongoDBPromise = exec(`curl -fsSL --retry 3 --retry-delay 2 -o "${archivePath}" "${downloadUrl}"`, EXEC_OPTIONS)
+      execCallbacksForChildWithNotifications(downloadMongoDBPromise.child, "Downloading MongoDB", mainWindow)
+      await downloadMongoDBPromise
+
+      // --strip-components=1 drops the archive's own top-level folder so the
+      // tree lands directly in ~/.medomics/mongodb, which is the only place
+      // getMongoDBPath() looks. Its name cannot be predicted from the URL
+      // anyway: the arm64 download unpacks to a "mongodb-macos-aarch64-*" dir.
+      fs.rmSync(mongoPath, { recursive: true, force: true })
+      fs.mkdirSync(mongoPath, { recursive: true })
+      let installMongoDBPromise = exec(`tar -xzf "${archivePath}" --strip-components=1 -C "${mongoPath}"`, EXEC_OPTIONS)
+      execCallbacksForChildWithNotifications(installMongoDBPromise.child, "Installing MongoDB", mainWindow)
+      await installMongoDBPromise
+
+      fs.rmSync(archivePath, { force: true })
+
+      let removed = { id: "Removing MongoDB installer", header: "Removing MongoDB installer Finished" }
+      mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.send("notification", { ...removed, message: "Removing MongoDB installer exited with code 0" })
+    } catch (error) {
+      console.error("MongoDB installation failed: ", error)
+      mainWindow &&
+        !mainWindow.isDestroyed() &&
+        mainWindow.webContents.send("notification", { id: "MongoDB Installation", message: error.message, header: "MongoDB Installation Error" })
+      return false
     }
 
-    let installMongoDBPromise = exec(`brew tap mongodb/brew && brew install mongodb-community@7.0.12`)
-    execCallbacksForChildWithNotifications(installMongoDBPromise.child, "Installing MongoDB", mainWindow)
-    
     return getMongoDBPath() !== null
   } else if (process.platform === "linux") {
     const linuxURLDict = {
@@ -148,20 +195,29 @@ export const installMongoDB = async () => {
       if (ubuntuVersion === "24.04") {
         mongoDBVersion = "8.0.9"
       }
-      const downloadPath = path.join(app.getPath("downloads"), `mongodb-linux-${architecture}-ubuntu${ubuntuVersion}-${mongoDBVersion}.tgz`)
-      let downloadMongoDBPromise = exec(`curl -o ${downloadPath} ${downloadUrl}`)
+      if (!downloadUrl) {
+        console.error(`No MongoDB build is published for Ubuntu ${ubuntuVersion} ${architecture}`)
+        return false
+      }
+      const medomicsPath = path.join(process.env.HOME, ".medomics")
+      fs.mkdirSync(medomicsPath, { recursive: true })
+      const downloadPath = path.join(medomicsPath, `mongodb-linux-${architecture}-ubuntu${ubuntuVersion}-${mongoDBVersion}.tgz`)
+      let downloadMongoDBPromise = exec(`curl -fsSL --retry 3 --retry-delay 2 -o "${downloadPath}" "${downloadUrl}"`, EXEC_OPTIONS)
       execCallbacksForChildWithNotifications(downloadMongoDBPromise.child, "Downloading MongoDB installer", mainWindow)
       await downloadMongoDBPromise
-      // Install MongoDB in the .medomics directory in the user's home directory
-      ubuntuVersion = ubuntuVersion.replace(".", "")
-      let command = `tar -xvzf ${downloadPath} -C ${process.env.HOME}/.medomics/ && mv ${process.env.HOME}/.medomics/mongodb-linux-${architecture}-ubuntu${ubuntuVersion}-${mongoDBVersion} ${process.env.HOME}/.medomics/mongodb`
-      let installMongoDBPromise = exec(command)
-
-      // let installMongoDBPromise = exec(`tar -xvzf ${downloadPath} && mv mongodb-linux-${architecture}-ubuntu${ubuntuVersion}-7.0.15 ${process.env.HOME}/.medomics/mongodb`)
+      // Install MongoDB in the .medomics directory in the user's home directory.
+      // --strip-components=1 unpacks straight into ~/.medomics/mongodb, so the
+      // archive's top-level folder name never has to be reconstructed, and a
+      // leftover tree from a previous attempt cannot end up nested inside the
+      // new one.
+      const mongoPath = path.join(medomicsPath, "mongodb")
+      fs.rmSync(mongoPath, { recursive: true, force: true })
+      fs.mkdirSync(mongoPath, { recursive: true })
+      let installMongoDBPromise = exec(`tar -xzf "${downloadPath}" --strip-components=1 -C "${mongoPath}"`, EXEC_OPTIONS)
       execCallbacksForChildWithNotifications(installMongoDBPromise.child, "Installing MongoDB", mainWindow)
       await installMongoDBPromise
 
-      const test = getMongoDBPath()
+      fs.rmSync(downloadPath, { force: true })
 
       return getMongoDBPath() !== null
     }

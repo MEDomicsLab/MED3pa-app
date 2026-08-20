@@ -656,20 +656,27 @@ ipcMain.handle("getBundledPythonEnvironment", async (event) => {
 })
 
 ipcMain.handle("installBundledPythonExecutable", async (event) => {
-  // Check if Python is installed
-  let pythonInstalled = getBundledPythonEnvironment()
-  if (pythonInstalled === null) {
-    // If Python is not installed, install it
-    return installBundledPythonExecutable(mainWindow)
-  } else {
+  // Any throw here would surface in the renderer as an unhandled rejection, and
+  // the setup modal has no catch: report failure as `false` instead.
+  try {
+    // Check if Python is installed
+    let pythonInstalled = getBundledPythonEnvironment()
+    if (pythonInstalled === null) {
+      // If Python is not installed, install it
+      return await installBundledPythonExecutable(mainWindow)
+    }
     // Check if the required packages are installed
-    let requirementsInstalled = checkPythonRequirements()
-    if (requirementsInstalled) {
-      return true
-    } else {
-      await installRequiredPythonPackages(mainWindow)
+    if (checkPythonRequirements()) {
       return true
     }
+    await installRequiredPythonPackages(mainWindow, pythonInstalled)
+    return true
+  } catch (error) {
+    console.error("Python setup failed: ", error)
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("notification", { id: "Python Installation", message: error.message, header: "Python Installation Error" })
+    }
+    return false
   }
 })
 
