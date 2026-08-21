@@ -489,8 +489,18 @@ export async function installBundledPythonExecutable(mainWindow) {
 
   if (fs.existsSync(pythonExecutablePath)) {
     // The interpreter is already there; only the packages may be missing.
-    await installRequiredPythonPackages(mainWindow, pythonExecutablePath)
-    return true
+    // This runs before the try block below, so a throw here used to escape the
+    // function entirely: no notification reached the setup modal and nothing was
+    // logged, leaving an interpreter with no packages and no explanation. Any
+    // second launch takes this path, so that is the common case, not the rare one.
+    try {
+      await installRequiredPythonPackages(mainWindow, pythonExecutablePath)
+      return true
+    } catch (error) {
+      console.error("Installing the python packages failed: ", error)
+      sendNotification(mainWindow, "Python Installation", error.message, "Python Installation Error")
+      return false
+    }
   }
 
   const requirementsFilePath = getRequirementsFilePath()
