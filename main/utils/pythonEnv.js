@@ -28,6 +28,108 @@ function pythonBuildFile(triple) {
 }
 
 /**
+ * @description The python-build-standalone target triple for the running machine.
+ * @returns {String} the triple to download
+ */
+function pythonBuildTriple() {
+  const isArm64 = process.arch === "arm64"
+  if (process.platform === "win32") {
+    // Windows on ARM runs the x86_64 build under emulation; there is no
+    // guarantee an aarch64 asset exists for every release tag.
+    return "x86_64-pc-windows-msvc"
+  }
+  if (process.platform === "darwin") {
+    return isArm64 ? "aarch64-apple-darwin" : "x86_64-apple-darwin"
+  }
+  // The baseline x86_64 build is used rather than the x86_64_v3 variant:
+  // v3 requires AVX2, so it faults on older CPUs.
+  return isArm64 ? "aarch64-unknown-linux-gnu" : "x86_64-unknown-linux-gnu"
+}
+
+// pip installing torch/ray prints far more than exec's 1 MB default buffer, and
+// blowing the buffer kills the child mid-install.
+const EXEC_OPTIONS = { maxBuffer: 256 * 1024 * 1024 }
+
+// Set while installBundledPythonExecutable() is running so the "empty python
+// folder" cleanup below cannot delete the directory tar is extracting into.
+let installInProgress = false
+
+/**
+ * @description Wraps a path/URL for the shell. Home directories and the app
+ * bundle path can both contain spaces.
+ * @param {String} value
+ * @returns {String} the quoted value
+ */
+function shellQuote(value) {
+  return `"${String(value).replace(/"/g, '\\"')}"`
+}
+
+/**
+ * @description Sends a single notification to the setup modal, if it is still open.
+ */
+function sendNotification(mainWindow, id, message, header) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("notification", { id: id, message: message, header: header })
+  }
+}
+
+/**
+ * @description Runs one setup command, streams its output to the setup modal and
+ * throws if it exits non-zero.
+ *
+ * Every step used to be fire-and-forget: a failing download reported "exited
+ * with code 0" and the next step then failed on a file that was never there.
+ * @param {BrowserWindow} mainWindow
+ * @param {String} id the notification id shown in the setup modal
+ * @param {String} command the command to run
+ */
+async function runSetupStep(mainWindow, id, command, options = {}) {
+  console.log(`${id}: ${command}`)
+  const execution = exec(command, { ...EXEC_OPTIONS, ...options })
+  execCallbacksForChildWithNotifications(execution.child, id, mainWindow)
+  try {
+    return await execution
+  } catch (error) {
+    const details = (error.stderr || error.message || "").toString().trim()
+    throw new Error(`${id} failed (exit code ${error.code}): ${details}`)
+  }
+}
+
+/**
+ * @description Resolves where the bundled python lives for the current run.
+ * @returns {{medomicsPath: String, bundledPythonPath: String, pythonExecutablePath: String}}
+ */
+function resolveBundledPythonPaths() {
+  let medomicsPath = path.join(getHomePath(), ".medomics")
+  let bundledPythonPath = path.join(medomicsPath, "python")
+
+  if (process.env.NODE_ENV !== "production" && !fs.existsSync(bundledPythonPath)) {
+    // In dev, fall back to a ./python folder next to the sources.
+    bundledPythonPath = path.join(process.cwd(), "python")
+    medomicsPath = process.cwd()
+  }
+
+  let pythonExecutablePath = path.join(bundledPythonPath, "bin", "python")
+  if (process.platform === "win32") {
+    pythonExecutablePath = path.join(bundledPythonPath, "python.exe")
+  }
+  return { medomicsPath, bundledPythonPath, pythonExecutablePath }
+}
+
+/**
+ * @description Absolute path of the requirements file the packaged app installs from.
+ * @returns {String} the path to requirements.txt
+ */
+function getRequirementsFilePath() {
+  if (process.env.NODE_ENV === "production") {
+    // process.resourcesPath, not process.cwd(): a packaged app launched from
+    // Finder/Explorer has no meaningful working directory (on macOS it is "/").
+    return path.join(process.resourcesPath, "pythonEnv", "requirements.txt")
+  }
+  return path.join(process.cwd(), "pythonEnv", "requirements.txt")
+}
+
+/**
  * Recursively calculates the size of a directory in bytes.
  * @param {string} dir - The directory path.
  * @returns {Promise<number>} The total size in bytes.
@@ -59,6 +161,11 @@ async function getDirectorySize(dir) {
  */
 async function checkSizeAndDeleteIfZero(directoryPath) {
     try {
+        // An install in flight has just created the folder tar is about to fill;
+        // deleting it from under the extraction is how partial installs happen.
+        if (installInProgress || !fs.existsSync(directoryPath)) {
+            return
+        }
         const size = await getDirectorySize(directoryPath)
         console.log(`Directory size is: ${size} bytes`)
 
@@ -208,83 +315,73 @@ function getThePythonExecutablePath(condaPath, envName) {
 }
 
 export function getBundledPythonEnvironment() {
-  let pythonEnvironment = null
+  const { medomicsPath, bundledPythonPath, pythonExecutablePath } = resolveBundledPythonPaths()
 
-  let bundledPythonPath = null
-
-  if (process.env.NODE_ENV === "production") {
-    // Get the user path followed by .medomics
-    let userPath = getHomePath()
-    let medomicsPath = path.join(userPath, ".medomics")
-
-    // Check if the .medomics directory exists
-    if (fs.existsSync(medomicsPath)) {
-      // Check if the python directory exists
-      let pythonPath = path.join(medomicsPath, "python")
-      if (fs.existsSync(pythonPath)) {
-        bundledPythonPath = pythonPath
-      }
-    } else {
-      // Create the .medomics directory
-      fs.mkdirSync(medomicsPath)
-    }
-
-    bundledPythonPath = path.join(userPath, ".medomics", "python")
-  } else {
-    // Check if the python path can be found in the .medomics directory
-    let medomicsDirExists = fs.existsSync(path.join(app.getPath("home"), ".medomics", "python"))
-    if (medomicsDirExists) {
-      bundledPythonPath = path.join(getHomePath(), ".medomics", "python")
-    } else {
-      bundledPythonPath = path.join(process.cwd(), "python")
-    }
+  if (!fs.existsSync(medomicsPath)) {
+    fs.mkdirSync(medomicsPath, { recursive: true })
   }
 
   // Check if the python folder is empty, if yes, delete it
   checkSizeAndDeleteIfZero(bundledPythonPath)
 
-  pythonEnvironment = path.join(bundledPythonPath, "bin", "python")
-  if (process.platform == "win32") {
-    pythonEnvironment = path.join(bundledPythonPath, "python.exe")
-  }
-  if (!fs.existsSync(pythonEnvironment)) {
-    pythonEnvironment = null
-  }
-  return pythonEnvironment
+  return fs.existsSync(pythonExecutablePath) ? pythonExecutablePath : null
 }
 
-export async function installRequiredPythonPackages(mainWindow) {
-  let requirementsFileName = "requirements.txt"
-  if (process.env.NODE_ENV === "production") {
-    installPythonPackage(mainWindow, pythonExecutablePath, null, path.join(process.cwd(), "resources", "pythonEnv", requirementsFileName))
-  } else {
-    installPythonPackage(mainWindow, pythonExecutablePath, null, path.join(process.cwd(), "pythonEnv", requirementsFileName))
+export async function installRequiredPythonPackages(mainWindow, pythonPath = null) {
+  if (pythonPath === null) {
+    // The old code referenced an undefined `pythonExecutablePath` here, so this
+    // whole path threw a ReferenceError whenever python was installed but its
+    // packages were not.
+    pythonPath = resolveBundledPythonPaths().pythonExecutablePath
   }
+  if (!fs.existsSync(pythonPath)) {
+    throw new Error(`Cannot install the python packages: no python interpreter at ${pythonPath}`)
+  }
+  await installPythonPackage(mainWindow, pythonPath, null, getRequirementsFilePath())
+}
+
+/**
+ * @description Normalises a distribution name the way PEP 503 does, so that
+ * scikit_learn / scikit-learn / Scikit-Learn all compare equal.
+ * @param {String} name
+ * @returns {String} the normalised name
+ */
+function normalizePackageName(name) {
+  return name.trim().toLowerCase().replace(/[-_.]+/g, "-")
+}
+
+/**
+ * @description Parses a requirements file into {name, version} pins.
+ *
+ * Comments have to be stripped: the old parser fed whole comment lines and
+ * trailing `# ...` notes straight into the version comparison, so every comment
+ * counted as a missing package and checkPythonRequirements() could never return
+ * true — the setup modal spun forever on a perfectly good install.
+ * @param {String} requirementsFilePath
+ * @returns {Array<{name: String, version: String}>} the parsed pins
+ */
+function parseRequirements(requirementsFilePath) {
+  return fs
+    .readFileSync(requirementsFilePath, "utf8")
+    .split("\n")
+    .map((line) => line.replace("\r", "").split("#")[0].trim())
+    .filter((line) => line !== "")
+    .map((line) => {
+      const [name, version] = line.split("==")
+      return { name: name.trim(), version: version === undefined ? undefined : version.trim() }
+    })
 }
 
 function comparePythonInstalledPackages(pythonPackages, requirements) {
+  const installed = new Map(pythonPackages.map((pythonPackage) => [normalizePackageName(pythonPackage.name), pythonPackage.version]))
+
   let missingPackages = []
-  for (let i = 0; i < requirements.length; i++) {
-    let requirement = requirements[i]
-    let requirementParts = requirement.split("==")
-    let requirementName = requirementParts[0]
-    let requirementVersion = requirementParts[1]
-    let found = false
-    for (let j = 0; j < pythonPackages.length; j++) {
-      let pythonPackage = pythonPackages[j]
-      if (pythonPackage.name === requirementName && pythonPackage.version === requirementVersion) {
-        found = true
-        break
-      } else if (pythonPackage.name.replace('-', '_') === requirementName && pythonPackage.version === requirementVersion) {
-        found = true
-        break
-      } else if (pythonPackage.name.replace('_', '-') === requirementName && pythonPackage.version === requirementVersion) {
-        found = true
-        break
-      }
-    }
+  for (const requirement of requirements) {
+    // An unpinned requirement only has to be present, at any version.
+    const installedVersion = installed.get(normalizePackageName(requirement.name))
+    const found = installedVersion !== undefined && (requirement.version === undefined || installedVersion === requirement.version)
     if (!found) {
-      missingPackages.push({ name: requirementName, version: requirementVersion })
+      missingPackages.push(requirement)
     }
   }
   console.log("Missing packages: " + JSON.stringify(missingPackages))
@@ -298,17 +395,18 @@ export function checkPythonRequirements(pythonPath = null, requirementsFilePath 
     pythonPath = getBundledPythonEnvironment()
   }
   if (requirementsFilePath === null) {
-    if (process.env.NODE_ENV === "production") {
-      requirementsFilePath = path.join(process.resourcesPath, "pythonEnv", "requirements.txt")
-    } else {
-      requirementsFilePath = path.join(process.cwd(), "pythonEnv", "requirements.txt")
-    }
+    requirementsFilePath = getRequirementsFilePath()
+  }
+  if (pythonPath === null || !fs.existsSync(requirementsFilePath)) {
+    return false
   }
   let pythonPackages = getInstalledPythonPackages(pythonPath)
-  let requirements = fs.readFileSync(requirementsFilePath, "utf8").split("\n")
-  // # Remove empty lines and \r
-  requirements = requirements.filter((line) => line.trim() !== "")
-  requirements = requirements.map((line) => line.replace("\r", ""))
+  if (pythonPackages.length === 0) {
+    // pip could not be queried at all: treat that as "not ready" rather than
+    // "nothing is missing".
+    return false
+  }
+  let requirements = parseRequirements(requirementsFilePath)
 
   let missingPackages = comparePythonInstalledPackages(pythonPackages, requirements)
   if (missingPackages.length === 0) {
@@ -325,7 +423,7 @@ export function getInstalledPythonPackages(pythonPath = null) {
 
   let pythonPackagesOutput = ""
   try {
-    pythonPackagesOutput = execSync(`${pythonPath} -m pip list --format=json`).toString()
+    pythonPackagesOutput = execSync(`${shellQuote(pythonPath)} -m pip list --format=json`, EXEC_OPTIONS).toString()
   } catch (error) {
     console.warn("Error retrieving python packages:", error)
   }
@@ -339,181 +437,122 @@ export function getInstalledPythonPackages(pythonPath = null) {
 
 export async function installPythonPackage(mainWindow, pythonPath, packageName = null, requirementsFilePath = null) {
   console.log("Installing python package: ", packageName, requirementsFilePath, " with pythonPath: ", pythonPath)
-  let execSyncResult = null
-  let pipUpgradePromise = exec(`${pythonPath} -m pip install --upgrade pip`)
-  execCallbacksForChildWithNotifications(pipUpgradePromise.child, "Python pip Upgrade", mainWindow)
-  await pipUpgradePromise
+  // --no-input keeps pip from blocking forever on a prompt no one can answer,
+  // since the child has no terminal attached.
+  const pip = `${shellQuote(pythonPath)} -m pip --no-input --disable-pip-version-check`
+
+  await runSetupStep(mainWindow, "Python pip Upgrade", `${pip} install --upgrade pip`)
+
   if (requirementsFilePath !== null) {
-    let installPythonPackagePromise = exec(`${pythonPath} -m pip install -r ${requirementsFilePath}`)
-    execCallbacksForChildWithNotifications(installPythonPackagePromise.child, "Python Package Installation from requirements", mainWindow)
-    await installPythonPackagePromise
+    await runSetupStep(mainWindow, "Python Package Installation from requirements", `${pip} install -r ${shellQuote(requirementsFilePath)}`)
   } else {
-    let installPythonPackagePromise = exec(`${pythonPath} -m pip install ${packageName}`)
-    execCallbacksForChildWithNotifications(installPythonPackagePromise.child, "Python Package Installation", mainWindow)
-    await installPythonPackagePromise
+    await runSetupStep(mainWindow, "Python Package Installation", `${pip} install ${packageName}`)
   }
 }
 
 export function execCallbacksForChildWithNotifications(child, id, mainWindow) {
-  mainWindow.webContents.send("notification", { id: id, message: `Starting...`, header: `${id} in progress` })
+  sendNotification(mainWindow, id, `Starting...`, `${id} in progress`)
   child.stdout.on("data", (data) => {
-    mainWindow.webContents.send("notification", { id: id, message: `stdout: ${data}`, header: `${id} in progress` })
+    sendNotification(mainWindow, id, `stdout: ${data}`, `${id} in progress`)
   })
   child.stderr.on("data", (data) => {
-    mainWindow.webContents.send("notification", { id: id, message: `stderr: ${data}`, header: `${id} Error` })
+    sendNotification(mainWindow, id, `stderr: ${data}`, `${id} Error`)
   })
   child.on("close", (code) => {
-    mainWindow.webContents.send("notification", { id: id, message: `${id} exited with code ${code}`, header: `${id} Finished` })
+    sendNotification(mainWindow, id, `${id} exited with code ${code}`, `${id} Finished`)
   })
 }
 
 function getHomePath() {
-  let homePath = null
-  if (process.platform === "win32") {
-    homePath = process.env.USERPROFILE
-  } else {
-    homePath = process.env.HOME
+  let homePath = process.platform === "win32" ? process.env.USERPROFILE : process.env.HOME
+  if (!homePath) {
+    homePath = app.getPath("home")
   }
   return homePath
 }
 
+
+/**
+ * @description Downloads and installs the bundled CPython, then installs the
+ * required packages into it.
+ *
+ * Everything runs against absolute paths. The previous version relied on the
+ * process working directory (`curl -O`, `tar -xvf <relative file>`), which is
+ * meaningless for a packaged app: on macOS a bundle launched from Finder starts
+ * with cwd "/", so curl could not write the archive and tar then had nothing to
+ * extract.
+ * @param {BrowserWindow} mainWindow The window that shows the setup progress
+ * @returns {Promise<Boolean>} true when python and its packages are ready
+ */
 export async function installBundledPythonExecutable(mainWindow) {
-  let bundledPythonPath = null
+  const { medomicsPath, bundledPythonPath, pythonExecutablePath } = resolveBundledPythonPaths()
 
-  let medomicsPath = null
-  let pythonParentFolderExtractString = ""
-  if (process.env.NODE_ENV === "production") {
-    console.log("getHomePath(): ", getHomePath())
-    let userPath = getHomePath()
-
-    medomicsPath = path.join(userPath, ".medomics")
-    pythonParentFolderExtractString = medomicsPath
-    let pythonPath = path.join(medomicsPath, "python")
-    // Check if the .medomics directory exists
-    if (fs.existsSync(medomicsPath)) {
-      // Check if the python directory exists
-      if (fs.existsSync(pythonPath)) {
-        bundledPythonPath = pythonPath
-      } else {
-        fs.mkdirSync(pythonPath)
-      }
-    } else {
-      // Create the .medomics directory
-      fs.mkdirSync(medomicsPath)
-      fs.mkdirSync(pythonPath)
-    }
-    bundledPythonPath = pythonPath
-  } else {
-    // Check if the python path can be found in the .medomics directory
-    let medomicsDirExists = fs.existsSync(path.join(app.getPath("home"), ".medomics", "python"))
-    if (medomicsDirExists) {
-      bundledPythonPath = path.join(getHomePath(), ".medomics", "python")
-    } else {
-      bundledPythonPath = path.join(process.cwd(), "python")
-    }
-    pythonParentFolderExtractString = bundledPythonPath.split("python")[0]
+  if (fs.existsSync(pythonExecutablePath)) {
+    // The interpreter is already there; only the packages may be missing.
+    await installRequiredPythonPackages(mainWindow, pythonExecutablePath)
+    return true
   }
-  // Check if the python executable is already installed
-  let pythonExecutablePath = null
-  if (process.platform == "win32") {
-    pythonExecutablePath = path.join(bundledPythonPath, "python.exe")
-  } else {
-    pythonExecutablePath = path.join(bundledPythonPath, "bin", "python")
+
+  const requirementsFilePath = getRequirementsFilePath()
+  if (!fs.existsSync(requirementsFilePath)) {
+    const message = `Cannot find the requirements file at ${requirementsFilePath}`
+    console.error(message)
+    sendNotification(mainWindow, "Python Installation", message, "Python Installation Error")
+    return false
   }
-  if (!fs.existsSync(pythonExecutablePath)) {
-    // If the python executable is not installed, download the python executable
-    if (process.platform == "win32") {
-      // Download the python executable
-      let outputFileName = pythonBuildFile("x86_64-pc-windows-msvc")
-      let url = `${PYTHON_BUILD_BASE}/${outputFileName}`
 
-      let downloadPromise = exec(`wget ${url} -O ${outputFileName}`, { shell: "powershell.exe" })
+  const archiveFileName = pythonBuildFile(pythonBuildTriple())
+  const archivePath = path.join(medomicsPath, archiveFileName)
+  const url = `${PYTHON_BUILD_BASE}/${archiveFileName}`
 
-      execCallbacksForChildWithNotifications(downloadPromise.child, "Python Downloading", mainWindow)
+  installInProgress = true
+  try {
+    fs.mkdirSync(medomicsPath, { recursive: true })
 
-      const { stdout, stderr } = await downloadPromise
-      let extractCommand = `tar -xvf ${outputFileName} -C ${pythonParentFolderExtractString}`
-      let extractionPromise = exec(extractCommand, { shell: "powershell.exe" })
-      execCallbacksForChildWithNotifications(extractionPromise.child, "Python Exec. Extracting", mainWindow)
-
-      const { stdout: extrac, stderr: extracErr } = await extractionPromise
-
-      // Install the required python packages
-      if (process.env.NODE_ENV === "production") {
-        installPythonPackage(mainWindow, pythonExecutablePath, null, path.join(process.cwd(), "resources", "pythonEnv", "requirements.txt"))
-      } else {
-        installPythonPackage(mainWindow, pythonExecutablePath, null, path.join(process.cwd(), "pythonEnv", "requirements.txt"))
-      }
-      let removeCommand = `rm ${outputFileName}`
-      let removePromise = exec(removeCommand, { shell: "powershell.exe" })
-      execCallbacksForChildWithNotifications(removePromise.child, "Python Exec. Removing", mainWindow)
-      const { stdout: remove, stderr: removeErr } = await removePromise
-    } else if (process.platform == "darwin") {
-      // Download the right python executable (arm64 or x86_64)
-      // isArm64 is a boolean; the old code compared it to the string "arm64",
-      // which is never true, so Apple Silicon machines silently got the x86_64
-      // build and ran python under Rosetta.
-      let isArm64 = process.arch === "arm64"
-      let file = pythonBuildFile(isArm64 ? "aarch64-apple-darwin" : "x86_64-apple-darwin")
-
-      let url = `${PYTHON_BUILD_BASE}/${file}`
-      let extractCommand = `tar -xvf ${file} -C ${pythonParentFolderExtractString}`
-      let downloadPromise = exec(`/bin/bash -c "$(curl -fsSLO ${url})"`)
-      execCallbacksForChildWithNotifications(downloadPromise.child, "Python Downloading", mainWindow)
-      const { stdout, stderr } = await downloadPromise
-
-      // Extract the python executable
-      let extractionPromise = exec(extractCommand)
-      execCallbacksForChildWithNotifications(extractionPromise.child, "Python Exec. Extracting", mainWindow)
-      const { stdout: extrac, stderr: extracErr } = await extractionPromise
-
-      // Remove the downloaded file
-      let removeCommand = `rm ${file}`
-      let removePromise = exec(removeCommand)
-      execCallbacksForChildWithNotifications(removePromise.child, "Python Exec. Removing", mainWindow)
-      const { stdout: remove, stderr: removeErr } = await removePromise
-
-      // Install the required python packages
-      // requirements_mac.txt does not exist in this repo; every platform now
-      // installs the same requirements.txt.
-      if (process.env.NODE_ENV === "production") {
-        installPythonPackage(mainWindow, pythonExecutablePath, null, path.join(process.resourcesPath, "pythonEnv", "requirements.txt"))
-      } else {
-        installPythonPackage(mainWindow, pythonExecutablePath, null, path.join(process.cwd(), "pythonEnv", "requirements.txt"))
-      }
-    } else if (process.platform == "linux") {
-      // Download the right python executable (arm64 or x86_64).
-      // The baseline x86_64 build is used rather than the x86_64_v3 variant the
-      // old code picked: v3 requires AVX2, so it faults on older CPUs.
-      let file = pythonBuildFile(process.arch === "arm64" ? "aarch64-unknown-linux-gnu" : "x86_64-unknown-linux-gnu")
-
-      let url = `${PYTHON_BUILD_BASE}/${file}`
-
-      // Download the python executable
-      let downloadPromise = exec(`wget ${url} -P ${pythonParentFolderExtractString}`)
-      execCallbacksForChildWithNotifications(downloadPromise.child, "Python Downloading", mainWindow)
-      const { stdout: download, stderr: downlaodErr } = await downloadPromise
-      // Extract the python executable
-      let extractCommand = `tar -xvf ${path.join(pythonParentFolderExtractString, file)} -C ${pythonParentFolderExtractString}`
-      let extractionPromise = exec(extractCommand)
-      execCallbacksForChildWithNotifications(extractionPromise.child, "Python Exec. Extracting", mainWindow)
-      const { stdout: extrac, stderr: extracErr } = await extractionPromise
-
-      // Remove the downloaded file
-      let removeCommand = `rm ${path.join(pythonParentFolderExtractString, file)}`
-      let removePromise = exec(removeCommand)
-      execCallbacksForChildWithNotifications(removePromise.child, "Python Exec. Removing", mainWindow)
-      const { stdout: remove, stderr: removeErr } = await removePromise
-
-      console.log("pythonExecutablePath: ", pythonExecutablePath)
-      console.log("process.cwd(): ", process)
-      console.log("process.resourcesPath: ", process.resourcesPath)
-      // Install the required python packages
-      if (process.env.NODE_ENV === "production") {
-        installPythonPackage(mainWindow, pythonExecutablePath, null, path.join(process.resourcesPath, "pythonEnv", "requirements.txt"))
-      } else {
-        installPythonPackage(mainWindow, pythonExecutablePath, null, path.join(process.cwd(), "pythonEnv", "requirements.txt"))
-      }
+    // A previous failed attempt can leave a truncated archive behind, and curl
+    // would happily extend it into something tar cannot read.
+    if (fs.existsSync(archivePath)) {
+      fs.rmSync(archivePath, { force: true })
     }
+
+    // curl ships with macOS, with Windows 10 1803+ and is a declared dependency
+    // of the .deb, so it is the one downloader available on all three platforms.
+    // -f makes HTTP errors non-zero exits instead of a saved error page.
+    await runSetupStep(mainWindow, "Python Downloading", `curl -fsSL --retry 3 --retry-delay 2 -o ${shellQuote(archivePath)} ${shellQuote(url)}`)
+
+    if (!fs.existsSync(archivePath)) {
+      throw new Error(`The download reported success but ${archivePath} is missing`)
+    }
+
+    // The archive holds a single top-level "python/" directory, so extracting
+    // into .medomics is what produces .medomics/python.
+    await runSetupStep(mainWindow, "Python Exec. Extracting", `tar -xzf ${shellQuote(archivePath)} -C ${shellQuote(medomicsPath)}`)
+
+    if (!fs.existsSync(pythonExecutablePath)) {
+      throw new Error(`Extraction finished but no python interpreter was found at ${pythonExecutablePath}`)
+    }
+
+    fs.rmSync(archivePath, { force: true })
+    sendNotification(mainWindow, "Python Exec. Removing", "Python Exec. Removing exited with code 0", "Python Exec. Removing Finished")
+
+    await installRequiredPythonPackages(mainWindow, pythonExecutablePath)
+    console.log("Bundled python installed at: ", pythonExecutablePath)
+    return true
+  } catch (error) {
+    console.error("Bundled python installation failed: ", error)
+    sendNotification(mainWindow, "Python Installation", error.message, "Python Installation Error")
+    // Leave nothing half-installed: a partial tree would make the next launch
+    // believe python is present.
+    try {
+      fs.rmSync(archivePath, { force: true })
+      if (!fs.existsSync(pythonExecutablePath) && fs.existsSync(bundledPythonPath)) {
+        fs.rmSync(bundledPythonPath, { recursive: true, force: true })
+      }
+    } catch (cleanupError) {
+      console.warn("Could not clean up after the failed python installation: ", cleanupError)
+    }
+    return false
+  } finally {
+    installInProgress = false
   }
 }

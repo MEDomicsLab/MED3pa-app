@@ -117,17 +117,24 @@ export async function runServer(isProd, serverPort, serverProcess, serverState, 
     }
   }
 
-  let env = process.env
+  // A copy, not a reference: writing to process.env.PATH here changed the PATH
+  // of the whole main process, including every later pip/brew call.
+  let env = { ...process.env }
   let bundledPythonPath = getBundledPythonEnvironment()
 
   if (bundledPythonPath !== null) {
-    bundledPythonPath = bundledPythonPath.replace("python.exe", "")
-
-    let scriptPath = path.join(bundledPythonPath, "Scripts")
-    let libPath = path.join(bundledPythonPath, "Lib")
-    let pythonPath = path.join(bundledPythonPath, "python.exe")
-
-    env.PATH = `${bundledPythonPath};${scriptPath};${libPath};${env.PATH}`
+    // The layouts differ: Windows keeps python.exe at the root of the install
+    // with Scripts/ and Lib/ next to it, POSIX keeps everything under bin/.
+    // Joining Windows folder names with ";" on macOS/Linux produced one long
+    // bogus entry that swallowed the first real element of PATH.
+    let entries = []
+    if (process.platform === "win32") {
+      const pythonRoot = path.dirname(bundledPythonPath)
+      entries = [pythonRoot, path.join(pythonRoot, "Scripts"), path.join(pythonRoot, "Lib")]
+    } else {
+      entries = [path.dirname(bundledPythonPath)]
+    }
+    env.PATH = [...entries, env.PATH].join(path.delimiter)
     console.log("env.PATH: " + env.PATH)
   }
 
@@ -193,14 +200,12 @@ export async function runServer(isProd, serverPort, serverProcess, serverState, 
             env: env
           })
           serverState.serverIsRunning = true
-        } else if (process.platform == "linux") {
+        } else if (process.platform == "linux" || process.platform == "darwin") {
+          // env is passed here too, so the go server sees the bundled python on
+          // its PATH the same way the Windows build does.
           serverProcess = execFile(path.join(process.resourcesPath, "go_executables/server_go"), args, {
-            windowsHide: false
-          })
-          serverState.serverIsRunning = true
-        } else if (process.platform == "darwin") {
-          serverProcess = execFile(path.join(process.resourcesPath, "go_executables/server_go"), args, {
-            windowsHide: false
+            windowsHide: false,
+            env: env
           })
           serverState.serverIsRunning = true
         }
