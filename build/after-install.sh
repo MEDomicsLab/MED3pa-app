@@ -17,6 +17,37 @@ TIME=$(date +"%Y-%m-%d_%H-%M-%S")
 LOG_FILE=/tmp/after-install-$TIME.log
 echo "After install script is running" >"$LOG_FILE"
 
+# NOTE: this runs FIRST, before the MongoDB section below. That section is
+# long, guarded by `set -e`, and has ~9 `exit 0` bail-out paths for
+# unrecognised distros and failed downloads -- any of which would otherwise
+# skip the fix below and leave an app that cannot launch at all. MongoDB is
+# optional (the in-app setup can install it); a working sandbox is not.
+# ── Fix Electron chrome-sandbox SUID permissions ──────────────────────────
+# Electron requires chrome-sandbox to be owned by root with mode 4755 (SUID).
+# Without this, launching from the GNOME application menu crashes with:
+#   FATAL:setuid_sandbox_host.cc - "chrome-sandbox is not configured correctly"
+# The install directory comes from electron-builder's productName, so a rename
+# would silently invalidate a hardcoded path and leave the app unlaunchable.
+# Fall back to locating it rather than trusting the literal.
+SANDBOX_PATH="/opt/MED3pa/chrome-sandbox"
+if [ ! -f "$SANDBOX_PATH" ]; then
+    FOUND=$(find /opt -maxdepth 2 -name chrome-sandbox -type f 2>/dev/null | head -n 1)
+    if [ -n "$FOUND" ]; then
+        echo "chrome-sandbox not at $SANDBOX_PATH, using $FOUND instead" >>"$LOG_FILE"
+        SANDBOX_PATH="$FOUND"
+    fi
+fi
+if [ -f "$SANDBOX_PATH" ]; then
+    if chown root:root "$SANDBOX_PATH" >>"$LOG_FILE" 2>&1 && chmod 4755 "$SANDBOX_PATH" >>"$LOG_FILE" 2>&1; then
+        echo "chrome-sandbox SUID bit set on $SANDBOX_PATH" >>"$LOG_FILE"
+    else
+        echo "WARNING: Failed to set chrome-sandbox owner/mode on $SANDBOX_PATH" >>"$LOG_FILE"
+    fi
+else
+    echo "WARNING: $SANDBOX_PATH not found – sandbox permissions not set" >>"$LOG_FILE"
+fi
+
+
 # ── Clean up old apt-based MongoDB repo config (from previous installs) ───
 rm -f /usr/share/keyrings/mongodb-server-8.0.gpg 2>/dev/null || true
 rm -f /etc/apt/sources.list.d/mongodb-org-8.0.list 2>/dev/null || true
@@ -199,21 +230,6 @@ if command -v mongod &>/dev/null; then
     fi
 else
     echo "WARNING: mongod not found on PATH after install." >>"$LOG_FILE"
-fi
-
-# ── Fix Electron chrome-sandbox SUID permissions ──────────────────────────
-# Electron requires chrome-sandbox to be owned by root with mode 4755 (SUID).
-# Without this, launching from the GNOME application menu crashes with:
-#   FATAL:setuid_sandbox_host.cc - "chrome-sandbox is not configured correctly"
-SANDBOX_PATH="/opt/MED3pa/chrome-sandbox"
-if [ -f "$SANDBOX_PATH" ]; then
-    if chown root:root "$SANDBOX_PATH" >>"$LOG_FILE" 2>&1 && chmod 4755 "$SANDBOX_PATH" >>"$LOG_FILE" 2>&1; then
-        echo "chrome-sandbox SUID bit set on $SANDBOX_PATH" >>"$LOG_FILE"
-    else
-        echo "WARNING: Failed to set chrome-sandbox owner/mode on $SANDBOX_PATH" >>"$LOG_FILE"
-    fi
-else
-    echo "WARNING: $SANDBOX_PATH not found – sandbox permissions not set" >>"$LOG_FILE"
 fi
 
 echo "After install script completed" >>"$LOG_FILE"
