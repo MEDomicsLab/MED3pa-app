@@ -95,12 +95,23 @@ async function runSetupStep(mainWindow, id, command, options = {}) {
   }
 }
 
+// This app's own directory under the home folder, deliberately NOT ".medomics".
+//
+// MEDomicsLab keeps its bundled interpreter at ~/.medomics/python. Sharing that
+// meant whichever app ran first won: on a machine with MEDomicsLab installed,
+// getBundledPythonEnvironment() found its python 3.9 already there, skipped the
+// 3.12 download entirely, and every requirement then resolved against
+// MEDomicsLab's package set — 14 of 16 unsatisfied, onnxruntime and MED3pa
+// absent. The reverse is just as bad: pip installing this app's pins over that
+// directory would break MEDomicsLab.
+const APP_HOME_DIR = ".med3pa"
+
 /**
  * @description Resolves where the bundled python lives for the current run.
  * @returns {{medomicsPath: String, bundledPythonPath: String, pythonExecutablePath: String}}
  */
 function resolveBundledPythonPaths() {
-  let medomicsPath = path.join(getHomePath(), ".medomics")
+  let medomicsPath = path.join(getHomePath(), APP_HOME_DIR)
   let bundledPythonPath = path.join(medomicsPath, "python")
 
   if (process.env.NODE_ENV !== "production" && !fs.existsSync(bundledPythonPath)) {
@@ -535,7 +546,7 @@ export async function installBundledPythonExecutable(mainWindow) {
     }
 
     // The archive holds a single top-level "python/" directory, so extracting
-    // into .medomics is what produces .medomics/python.
+    // into the app home dir is what produces ~/.med3pa/python.
     await runSetupStep(mainWindow, "Python Exec. Extracting", `tar -xzf ${shellQuote(archivePath)} -C ${shellQuote(medomicsPath)}`)
 
     if (!fs.existsSync(pythonExecutablePath)) {
