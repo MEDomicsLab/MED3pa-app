@@ -1,5 +1,6 @@
 /* eslint-disable no-unused-vars, no-case-declarations, camelcase */
 import { toast } from "react-toastify"
+import { ipcRenderer } from "electron"
 
 const { MongoClient } = require("mongodb")
 const fs = require("fs")
@@ -20,12 +21,55 @@ function stripIds(doc = {}) {
   return rest;
 }
 
+// In flight connection attempt, so simultaneous callers share one rather than
+// each opening their own client.
+let connecting = null
+
+/**
+ * @description Open (or reuse) the connection to the data database.
+ *
+ * The previous version assigned `client` before awaiting connect(), so a single
+ * failed attempt — most often querying during the window where mongod has been
+ * spawned but has not yet bound its port — left a dead client cached and every
+ * later call reused it, for the lifetime of the window. Now a failure caches
+ * nothing, asks the main process to bring mongod back, and retries once.
+ * @returns {Promise<Db>} the data database
+ */
 export async function connectToMongoDB() {
-  if (!client) {
-    client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology: true })
-    await client.connect()
+  if (client) return client.db(dbName)
+  if (connecting) return connecting
+
+  connecting = (async () => {
+    const open = async () => {
+      const candidate = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology: true })
+      await candidate.connect()
+      // Only cache once connect() has actually succeeded.
+      client = candidate
+      return client.db(dbName)
+    }
+
+    try {
+      return await open()
+    } catch (error) {
+      console.warn("MongoDB connection failed, asking the main process to start it: ", error.message)
+      try {
+        const status = await ipcRenderer.invoke("ensureMongoRunning")
+        if (!status?.started) {
+          throw new Error(status?.error || "MongoDB is not reachable.")
+        }
+      } catch (ipcError) {
+        // Surface the original connection error, which is the more useful one.
+        throw error
+      }
+      return await open()
+    }
+  })()
+
+  try {
+    return await connecting
+  } finally {
+    connecting = null
   }
-  return client.db(dbName)
 }
 
 /**

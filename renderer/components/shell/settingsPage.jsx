@@ -1,9 +1,7 @@
 /* eslint-disable no-unused-vars */
 import React, { useEffect, useState, useContext } from "react"
-var path = require("path")
-import fs from "fs"
-const { spawn } = require("child_process")
 import { ipcRenderer } from "electron"
+import { toast } from "react-toastify"
 import ModulePage from "../generalPurpose/modulePage"
 import { Button } from "primereact/button"
 import { TabView, TabPanel } from "primereact/tabview"
@@ -164,81 +162,22 @@ const SettingsPage = ({ pageId = "settings" }) => {
   })
 
   /**
-   * Start MongoDB against the config written into the current workspace
+   * @description Ask the main process to start MongoDB.
+   *
+   * This used to spawn mongod directly from the renderer. That process was not
+   * the one tracked in main's `mongoProcess`, so it was never stopped on quit
+   * and outlived the app holding the workspace dbPath lock — after which the
+   * next launch's mongod could not start at all. Routing through the main
+   * process keeps a single owner of the mongod lifecycle.
    */
-  const startMongo = () => {
-    let workspacePath = workspace.workingDirectory.path
-    const mongoConfigPath = path.join(workspacePath, ".med3pa", "mongod.conf") // see APP_WORKSPACE_DIR in main/utils/workspace.js
-    let mongod = getMongoDBPath()
-    let mongoResult = spawn(mongod, ["--config", mongoConfigPath])
-
-    mongoResult.stdout.on("data", (data) => {
-      console.log(`MongoDB stdout: ${data}`)
-    })
-
-    mongoResult.stderr.on("data", (data) => {
-      console.error(`MongoDB stderr: ${data}`)
-    })
-
-    mongoResult.on("close", (code) => {
-      console.log(`MongoDB process exited with code ${code}`)
-    })
-
-    mongoResult.on("error", (err) => {
-      console.error("Failed to start MongoDB: ", err)
-    })
-  }
-
-  /**
-   * Locate the mongod executable for the current platform
-   * @returns {String|null} path to mongod, or null if it could not be found
-   */
-  function getMongoDBPath() {
-    if (process.platform === "win32") {
-      const paths = process.env.PATH.split(path.delimiter)
-      for (let i = 0; i < paths.length; i++) {
-        const binPath = path.join(paths[i], "mongod.exe")
-        if (fs.existsSync(binPath)) {
-          return binPath
-        }
-      }
-
-      const programFilesPath = process.env["ProgramFiles"]
-      if (programFilesPath) {
-        const mongoPath = path.join(programFilesPath, "MongoDB", "Server")
-        const dirs = fs.readdirSync(mongoPath)
-        for (let i = 0; i < dirs.length; i++) {
-          const binPath = path.join(mongoPath, dirs[i], "bin", "mongod.exe")
-          if (fs.existsSync(binPath)) {
-            return binPath
-          }
-        }
-      }
-      console.error("mongod not found")
-      return null
-    } else if (process.platform === "darwin") {
-      if (process.env.NODE_ENV === "production") {
-        if (fs.existsSync(path.join(process.env.HOME, ".medomics", "mongodb", "bin", "mongod"))) {
-          return path.join(process.env.HOME, ".medomics", "mongodb", "bin", "mongod")
-        }
-      } else {
-        return "mongod"
-      }
-    } else if (process.platform === "linux") {
-      const paths = process.env.PATH.split(path.delimiter)
-      for (let i = 0; i < paths.length; i++) {
-        const binPath = path.join(paths[i], "mongod")
-        if (fs.existsSync(binPath)) {
-          return binPath
-        }
-      }
-      if (fs.existsSync("/usr/bin/mongod")) {
-        return "/usr/bin/mongod"
-      }
-      if (fs.existsSync("/home/" + process.env.USER + "/.medomics/mongodb/bin/mongod")) {
-        return "/home/" + process.env.USER + "/.medomics/mongodb/bin/mongod"
-      }
-      return null
+  const startMongo = async () => {
+    const status = await ipcRenderer.invoke("ensureMongoRunning")
+    if (status?.started) {
+      setMongoServerIsRunning(true)
+      toast.success("MongoDB is running")
+    } else {
+      toast.error(status?.error || "Could not start MongoDB")
+      if (status?.details) console.error("MongoDB startup output:\n" + status.details)
     }
   }
 

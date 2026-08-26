@@ -17,8 +17,13 @@ import {
 import { installMongoDB, checkRequirements } from "./utils/installation"
 
 const fs = require("fs")
+const net = require("net")
 var path = require("path")
 let mongoProcess = null
+// Set while startMongoDB is in flight so concurrent callers (workspace change,
+// a renderer asking for a reconnect) share one attempt instead of racing to
+// spawn several mongod processes against the same dbPath.
+let mongoStarting = null
 const dirTree = require("directory-tree")
 const { exec, spawn, execSync } = require("child_process")
 let serverProcess = null
@@ -381,16 +386,43 @@ if (isProd) {
           console.warn("Failed to kill mongod: ", error)
         }
       }
-      // Start MongoDB with the new configuration
-      startMongoDB(data, mongoProcess)
+      // Start MongoDB with the new configuration and WAIT for it to be
+      // reachable. Returning before that let the renderer start recensing the
+      // workspace against a database that was not listening yet.
+      const mongoStatus = await startMongoDB(data)
+      if (!mongoStatus.started) {
+        // Not fatal — the workspace is still usable for everything that does not
+        // touch the database — but it must be visible, because every consumer
+        // swallows the failure (loadMEDDataObjects returns {} on error, so the
+        // workspace merely looks empty).
+        notifyMongoUnavailable(mongoStatus)
+      }
       return {
         workingDirectory: dirTree(app.getPath("sessionData")),
         hasBeenSet: hasBeenSet,
-        newPort: serverPort
+        newPort: serverPort,
+        mongoStarted: mongoStatus.started
       }
     } catch (error) {
       console.error("Failed to change workspace: ", error)
     }
+  })
+
+  /**
+   * @description Bring MongoDB back up for the current workspace, on demand.
+   *
+   * The renderer calls this when a query fails: rather than every caller
+   * guessing, there is one owner of the process. Returns the same status object
+   * as startMongoDB.
+   */
+  ipcMain.handle("ensureMongoRunning", async () => {
+    const workspacePath = app.getPath("sessionData")
+    if (!workspacePath || !hasBeenSet) {
+      return { started: false, error: "No workspace has been opened yet." }
+    }
+    const status = await startMongoDB(workspacePath)
+    if (!status.started) notifyMongoUnavailable(status)
+    return status
   })
 
   /**
@@ -817,46 +849,162 @@ function openWindowFromURL(url) {
 }
 
 // Function to start MongoDB
-function startMongoDB(workspacePath) {
-  const mongoConfigPath = path.join(workspacePath, ".med3pa", "mongod.conf") // see APP_WORKSPACE_DIR in main/utils/workspace.js
-  if (fs.existsSync(mongoConfigPath)) {
-    console.log("Starting MongoDB with config: " + mongoConfigPath)
-    let mongod = getMongoDBPath()
-    if (process.platform !== "darwin") {
-      mongoProcess = spawn(mongod, [
-      "--config",
-      mongoConfigPath,
-      "--port",
-      MEDconfig.mongoPort
-    ])
+/**
+ * @description Tell the renderer MongoDB is unreachable, with the reason.
+ * @param {{error?: String, details?: String}} status from startMongoDB
+ */
+function notifyMongoUnavailable(status) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("mongoUnavailable", {
+      message: status.error || "MongoDB is not reachable.",
+      details: status.details || ""
+    })
+  }
+}
 
-    } else {
-      if (fs.existsSync(getMongoDBPath())) {
-        mongoProcess = spawn(getMongoDBPath(), ["--config", mongoConfigPath])
+/**
+ * @description Resolves once something accepts a TCP connection on the port.
+ *
+ * Spawning mongod returns immediately, but it needs anywhere from a few hundred
+ * milliseconds to several seconds to bind — longer on a fresh dbPath, which it
+ * has to initialise first. Anything that talked to the database in that window
+ * got ECONNREFUSED.
+ * @param {Number} port
+ * @param {Number} timeoutMs give up after this long
+ * @returns {Promise<void>} resolves when the port accepts a connection
+ */
+function waitForPort(port, timeoutMs = 30000, intervalMs = 250) {
+  const deadline = Date.now() + timeoutMs
+  return new Promise((resolve, reject) => {
+    const attempt = () => {
+      const socket = net.connect({ port: port, host: "127.0.0.1" })
+      const done = (fn, arg) => {
+        socket.removeAllListeners()
+        socket.destroy()
+        fn(arg)
+      }
+      socket.once("connect", () => done(resolve))
+      socket.once("error", () => {
+        socket.removeAllListeners()
+        socket.destroy()
+        if (Date.now() >= deadline) {
+          reject(new Error(`Nothing accepted a connection on port ${port} within ${Math.round(timeoutMs / 1000)}s`))
+        } else {
+          setTimeout(attempt, intervalMs)
+        }
+      })
+    }
+    attempt()
+  })
+}
+
+/**
+ * @description Last lines of the workspace's mongod.log.
+ *
+ * mongod writes startup failures (a stale lock, an unwritable dbPath, a port
+ * already taken) to its log file and not to stderr, so without this the process
+ * just exits and the reason is invisible.
+ * @param {String} workspacePath
+ * @returns {String} the tail of the log, or "" if unreadable
+ */
+function readMongoLogTail(workspacePath, lines = 15) {
+  try {
+    const logPath = path.join(workspacePath, ".med3pa", "mongod.log")
+    if (!fs.existsSync(logPath)) return ""
+    return fs.readFileSync(logPath, "utf8").trim().split("\n").slice(-lines).join("\n")
+  } catch (error) {
+    return ""
+  }
+}
+
+/**
+ * @description Start the workspace's MongoDB and wait until it is actually reachable.
+ *
+ * Returns a status object rather than throwing, so callers can surface the
+ * reason. Concurrent calls share one attempt via `mongoStarting`: this is the
+ * single owner of the mongod process, which matters because a mongod spawned
+ * anywhere else is not tracked in `mongoProcess`, is never stopped on quit, and
+ * keeps the dbPath lock — after which the next launch cannot start at all.
+ * @param {String} workspacePath
+ * @returns {Promise<{started: Boolean, error?: String, details?: String}>}
+ */
+function startMongoDB(workspacePath) {
+  if (mongoStarting) return mongoStarting
+
+  mongoStarting = (async () => {
+    const mongoConfigPath = path.join(workspacePath, ".med3pa", "mongod.conf") // see APP_WORKSPACE_DIR in main/utils/workspace.js
+    if (!fs.existsSync(mongoConfigPath)) {
+      const error = `MongoDB config file does not exist: ${mongoConfigPath}`
+      console.error(error)
+      return { started: false, error: error }
+    }
+
+    // Already up (a previous run, or another owner): nothing to do.
+    try {
+      await waitForPort(MEDconfig.mongoPort, 1000, 200)
+      console.log(`MongoDB already listening on port ${MEDconfig.mongoPort}`)
+      return { started: true }
+    } catch (notRunning) {
+      // expected — carry on and start it
+    }
+
+    const mongod = getMongoDBPath()
+    if (!mongod) {
+      // spawn(null, ...) throws an opaque ERR_INVALID_ARG_TYPE; say what is wrong.
+      const error = "Could not find a mongod executable. Install MongoDB, or use System > Run first-time setup."
+      console.error(error)
+      return { started: false, error: error }
+    }
+
+    console.log("Starting MongoDB with config: " + mongoConfigPath)
+    let output = ""
+    try {
+      if (process.platform !== "darwin") {
+        mongoProcess = spawn(mongod, ["--config", mongoConfigPath, "--port", MEDconfig.mongoPort])
+      } else if (fs.existsSync(mongod)) {
+        mongoProcess = spawn(mongod, ["--config", mongoConfigPath])
       } else {
         mongoProcess = spawn("/opt/homebrew/Cellar/mongodb-community/7.0.12/bin/mongod", ["--config", mongoConfigPath], { shell: true })
       }
+    } catch (error) {
+      console.error("Failed to spawn MongoDB: ", error)
+      return { started: false, error: `Could not start MongoDB: ${error.message}` }
     }
+
     mongoProcess.stdout.on("data", (data) => {
+      output += data
       console.log(`MongoDB stdout: ${data}`)
     })
-
     mongoProcess.stderr.on("data", (data) => {
+      output += data
       console.error(`MongoDB stderr: ${data}`)
     })
-
     mongoProcess.on("close", (code) => {
       console.log(`MongoDB process exited with code ${code}`)
     })
 
-    mongoProcess.on("error", (err) => {
-      console.error("Failed to start MongoDB: ", err)
-      // reject(err)
+    // Race readiness against the process dying, so a mongod that exits on
+    // startup reports immediately rather than waiting out the full timeout.
+    const exited = new Promise((resolve) => {
+      mongoProcess.once("close", (code) => resolve(`mongod exited with code ${code}`))
+      mongoProcess.once("error", (error) => resolve(`mongod could not be started: ${error.message}`))
     })
-  } else {
-    const errorMsg = `MongoDB config file does not exist: ${mongoConfigPath}`
-    console.error(errorMsg)
-  }
+
+    try {
+      const outcome = await Promise.race([waitForPort(MEDconfig.mongoPort).then(() => null), exited])
+      if (outcome !== null) throw new Error(outcome)
+      console.log(`MongoDB is accepting connections on port ${MEDconfig.mongoPort}`)
+      return { started: true }
+    } catch (error) {
+      const details = [output.trim(), readMongoLogTail(workspacePath)].filter((part) => part !== "").join("\n")
+      console.error("MongoDB did not become reachable: ", error.message, details)
+      return { started: false, error: error.message, details: details }
+    }
+  })()
+
+  return mongoStarting.finally(() => {
+    mongoStarting = null
+  })
 }
 
 // Function to stop MongoDB
