@@ -22,6 +22,16 @@ PYTHON_VERSION="${2:-3.12}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CONDA="$(command -v conda || echo conda)"
 
+# Refuse to touch an existing environment: `conda create -y` recreates the
+# prefix, so running this with the default name against an env you already
+# depend on destroys it.
+if "$CONDA" env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
+  echo "ERROR: a conda environment named '$ENV_NAME' already exists."
+  echo "Pick another name, or remove it first with:"
+  echo "    conda env remove -n $ENV_NAME"
+  exit 1
+fi
+
 echo "==> Creating conda environment '$ENV_NAME' (python $PYTHON_VERSION)"
 "$CONDA" create -n "$ENV_NAME" "python=$PYTHON_VERSION" -y
 
