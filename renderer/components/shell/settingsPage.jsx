@@ -14,6 +14,7 @@ import { Column } from "primereact/column"
 import { WorkspaceContext } from "../workspace/workspaceContext"
 import FirstSetupModal from "../generalPurpose/installation/firstSetupModal"
 import { requestBackend } from "../../utilities/requests"
+import { checkServerHealth, SERVER_POLL_INTERVAL_MS } from "../../utilities/serverHealth"
 import MEDconfig from "../../../medomics.dev"
 
 /**
@@ -51,18 +52,9 @@ const SettingsPage = ({ pageId = "settings" }) => {
   /**
    * Check if the Go server is responding
    */
+  // Shared with the header indicator so the two cannot report different things.
   const checkServer = () => {
-    requestBackend(
-      port,
-      "get_server_health",
-      { pageId: pageId },
-      (data) => {
-        if (data) setServerIsRunning(true)
-      },
-      () => {
-        setServerIsRunning(false)
-      }
-    )
+    checkServerHealth(port, pageId).then(setServerIsRunning)
   }
 
   /**
@@ -157,7 +149,7 @@ const SettingsPage = ({ pageId = "settings" }) => {
           setPythonEmbedded({ ...pythonEmbedded, pythonEmbedded: condaPath })
         }
       })
-    }, 5000)
+    }, SERVER_POLL_INTERVAL_MS)
     return () => clearInterval(interval)
   })
 

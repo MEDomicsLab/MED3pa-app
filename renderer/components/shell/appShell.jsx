@@ -3,6 +3,7 @@ import { ipcRenderer } from "electron"
 import { toast } from "react-toastify"
 import { WorkspaceContext } from "../workspace/workspaceContext"
 import { requestBackend } from "../../utilities/requests"
+import { checkServerHealth, resetServerScripts, SERVER_POLL_INTERVAL_MS } from "../../utilities/serverHealth"
 import MED3paPage from "../med3pa/med3paPage"
 import WorkspaceGate from "./workspaceGate"
 import DataAndModelsPanel from "./dataAndModelsPanel"
@@ -73,43 +74,75 @@ const AppShell = () => {
     )
   }
 
-  // Ping the Go server once the port is known, and retry a few times while it boots
+  // Connect to the Go server, then keep the indicator honest.
+  //
+  // This used to be a one-shot: it pinged on mount, retried five times and then
+  // stopped forever, so the header latched on whatever it saw in the first ten
+  // seconds. Start the server later from System and the dot still read "Server
+  // down"; let the server die and it still read "Server ready". The System page
+  // meanwhile polled every five seconds, which is why the two disagreed.
   useEffect(() => {
     if (!port) return
     let attempt = 0
     let cancelled = false
+    let pollId = null
+    let didReset = false
 
-    const ping = () => {
-      if (cancelled) return
-      requestBackend(
-        port,
-        "clearAll",
-        { data: "clearAll" },
-        () => {
-          if (cancelled) return
-          setServerIsUp(true)
-          if (attempt > 0) toast.success("Go server is connected and ready")
-          syncPythonEnv()
-        },
-        () => {
-          if (cancelled) return
-          setServerIsUp(false)
-          attempt += 1
-          if (attempt === 1) {
-            // The server may simply not have finished starting: ask the main
-            // process to (re)start it, then keep retrying for a short while.
-            ipcRenderer.invoke("getBundledPythonEnvironment").then((pythonPath) => {
-              ipcRenderer.invoke("start-server", pythonPath)
-            })
-          }
-          if (attempt <= 5) setTimeout(ping, 2000)
-          else toast.error("Go server is not responding — check the python environment in the logs")
-        }
-      )
+    // Run once, the first time the server is seen alive — whether that is on the
+    // initial connect or minutes later when the user starts it from System.
+    // Reaps python processes left by a previous session; deliberately not on
+    // every poll, since it kills running analyses.
+    const onFirstContact = () => {
+      if (didReset) return
+      didReset = true
+      resetServerScripts(port)
+      syncPythonEnv()
     }
-    ping()
+
+    // Read-only check on a timer, same endpoint and interval the System page uses.
+    const poll = async () => {
+      const up = await checkServerHealth(port, "appShell")
+      if (cancelled) return
+      setServerIsUp(up)
+      if (up) onFirstContact()
+    }
+
+    const connect = async () => {
+      if (cancelled) return
+      const up = await checkServerHealth(port, "appShell")
+      if (cancelled) return
+
+      if (up) {
+        setServerIsUp(true)
+        if (attempt > 0) toast.success("Go server is connected and ready")
+        onFirstContact()
+        pollId = setInterval(poll, SERVER_POLL_INTERVAL_MS)
+        return
+      }
+
+      setServerIsUp(false)
+      attempt += 1
+      if (attempt === 1) {
+        // The server may simply not have finished starting: ask the main
+        // process to (re)start it, then keep retrying for a short while.
+        ipcRenderer.invoke("getBundledPythonEnvironment").then((pythonPath) => {
+          ipcRenderer.invoke("start-server", pythonPath)
+        })
+      }
+      if (attempt <= 5) {
+        setTimeout(connect, 2000)
+      } else {
+        toast.error("Go server is not responding — check the python environment in the logs")
+        // Keep watching anyway: the user can still start it from System, and the
+        // indicator has to notice when they do.
+        pollId = setInterval(poll, SERVER_POLL_INTERVAL_MS)
+      }
+    }
+
+    connect()
     return () => {
       cancelled = true
+      if (pollId) clearInterval(pollId)
     }
   }, [port])
 
