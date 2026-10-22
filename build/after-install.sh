@@ -17,18 +17,6 @@ TIME=$(date +"%Y-%m-%d_%H-%M-%S")
 LOG_FILE=/tmp/after-install-$TIME.log
 echo "After install script is running" >"$LOG_FILE"
 
-# NOTE: this runs FIRST, before the MongoDB section below. That section is
-# long, guarded by `set -e`, and has ~9 `exit 0` bail-out paths for
-# unrecognised distros and failed downloads -- any of which would otherwise
-# skip the fix below and leave an app that cannot launch at all. MongoDB is
-# optional (the in-app setup can install it); a working sandbox is not.
-# ── Fix Electron chrome-sandbox SUID permissions ──────────────────────────
-# Electron requires chrome-sandbox to be owned by root with mode 4755 (SUID).
-# Without this, launching from the GNOME application menu crashes with:
-#   FATAL:setuid_sandbox_host.cc - "chrome-sandbox is not configured correctly"
-# The install directory comes from electron-builder's productName, so a rename
-# would silently invalidate a hardcoded path and leave the app unlaunchable.
-# Fall back to locating it rather than trusting the literal.
 SANDBOX_PATH="/opt/MED3pa/chrome-sandbox"
 if [ ! -f "$SANDBOX_PATH" ]; then
     FOUND=$(find /opt -maxdepth 2 -name chrome-sandbox -type f 2>/dev/null | head -n 1)

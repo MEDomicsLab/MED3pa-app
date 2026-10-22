@@ -116,7 +116,7 @@ protobuf==4.21.12
 #     -e git+https://github.com/MEDomicsLab/MED3pa.git@<sha>#egg=MED3pa
 # Its own pins (numpy<2.1, pandas<3, scikit_learn<2, scipy<2, setuptools<70,
 # torch<3, tqdm<5, xgboost==2.1.1, PyYAML<7) are all satisfied above.
-MED3pa==1.1.0a1
+MED3pa==1.1.0a3
 
 # --- developer-only (settings_generator, not needed at runtime) --------------
 # dpath==2.1.6

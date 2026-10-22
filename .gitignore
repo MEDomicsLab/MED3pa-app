@@ -51,3 +51,6 @@ renderer/.next-verify
 
 # MED3pa checkpointer writes run artefacts here at runtime
 go_server/checkpoints/
+
+# MED3pa checkpointer also writes run artefacts here
+pythonCode/checkpoints/
