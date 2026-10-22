@@ -67,6 +67,28 @@ const exec = util.promisify(require("child_process").exec)
 // child part-way through.
 const EXEC_OPTIONS = { maxBuffer: 256 * 1024 * 1024 }
 
+/**
+ * @description The interpreter the user configured in System, if it still exists.
+ *
+ * Someone who points the app at their own conda environment has a perfectly
+ * good python; only looking for the bundled one would report "not installed"
+ * and put the first-time setup dialog in front of them on every launch.
+ * @returns {String|null} the configured interpreter path, or null
+ */
+const getConfiguredPythonEnvironment = () => {
+  try {
+    const settingsFilePath = path.join(app.getPath("userData"), "settings.json")
+    if (!fs.existsSync(settingsFilePath)) return null
+    const settings = JSON.parse(fs.readFileSync(settingsFilePath, "utf8"))
+    if (settings?.condaPath && fs.existsSync(settings.condaPath)) {
+      return settings.condaPath
+    }
+  } catch (error) {
+    console.warn("Could not read the configured python path: ", error)
+  }
+  return null
+}
+
 export const checkRequirements = async () => {
   // Check if .medomics directory exists
   let medomicsDirExists = fs.existsSync(path.join(app.getPath("home"), ".medomics"))
@@ -74,7 +96,9 @@ export const checkRequirements = async () => {
     fs.mkdirSync(path.join(app.getPath("home"), ".medomics"))
   }
   let mongoDBInstalled = getMongoDBPath()
-  let pythonInstalled = getBundledPythonEnvironment()
+  // A configured interpreter counts: the bundled one is a convenience, not the
+  // only supported way to run the python layer.
+  let pythonInstalled = getBundledPythonEnvironment() || getConfiguredPythonEnvironment()
 
   console.log("MongoDB installed: " + mongoDBInstalled)
   console.log("Python installed: " + pythonInstalled)

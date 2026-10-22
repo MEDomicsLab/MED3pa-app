@@ -8,6 +8,7 @@ import WorkspaceGate from "./workspaceGate"
 import DataAndModelsPanel from "./dataAndModelsPanel"
 import SettingsPage from "./settingsPage"
 import NotificationOverlay from "../generalPurpose/notificationOverlay"
+import FirstSetupModal from "../generalPurpose/installation/firstSetupModal"
 
 /**
  * @description Top-level chrome of the standalone MED3pa application.
@@ -22,6 +23,26 @@ const AppShell = () => {
   const [serverIsUp, setServerIsUp] = useState(false)
   const [panelVisible, setPanelVisible] = useState(false)
   const [view, setView] = useState("med3pa") // "med3pa" | "settings"
+  // Starts true so the setup modal does not flash before the check answers.
+  const [requirementsMet, setRequirementsMet] = useState(true)
+
+  // Offer first-time setup when MongoDB or the bundled python are missing.
+  //
+  // MEDomicsLab mounts this on its Home page, which the standalone app does not
+  // have — so until now the modal only existed behind a button in System, and a
+  // fresh install looked like it simply did not work rather than like it needed
+  // setting up.
+  useEffect(() => {
+    ipcRenderer
+      .invoke("checkRequirements")
+      .then((data) => {
+        setRequirementsMet(Boolean(data?.pythonInstalled && data?.mongoDBInstalled))
+      })
+      .catch((error) => {
+        // Do not trap the user behind a modal if the check itself fails.
+        console.error("Could not check the installation requirements: ", error)
+      })
+  }, [])
 
   const workspaceIsSet = workspace?.hasBeenSet === true
 
@@ -92,7 +113,25 @@ const AppShell = () => {
     }
   }, [port])
 
-  if (!workspaceIsSet) return <WorkspaceGate />
+  // Setup is offered over the workspace gate too, and deliberately so: opening a
+  // workspace immediately tries to start mongod against it, so on a fresh
+  // machine the user would otherwise hit "MongoDB is not reachable" before ever
+  // being told MongoDB was not installed.
+  if (!workspaceIsSet) {
+    return (
+      <>
+        <WorkspaceGate />
+        {!requirementsMet && (
+          <FirstSetupModal
+            visible={!requirementsMet}
+            closable={true}
+            onHide={() => setRequirementsMet(true)}
+            setRequirementsMet={setRequirementsMet}
+          />
+        )}
+      </>
+    )
+  }
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", fontFamily: "sans-serif" }}>
@@ -162,6 +201,17 @@ const AppShell = () => {
       </div>
 
       <DataAndModelsPanel visible={panelVisible} onHide={() => setPanelVisible(false)} />
+
+      {/* closable so a user whose environment is managed by hand (a conda env
+          set in System) is not blocked by a setup they do not need. */}
+      {!requirementsMet && (
+        <FirstSetupModal
+          visible={!requirementsMet}
+          closable={true}
+          onHide={() => setRequirementsMet(true)}
+          setRequirementsMet={setRequirementsMet}
+        />
+      )}
     </div>
   )
 }
