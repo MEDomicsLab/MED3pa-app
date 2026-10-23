@@ -5,6 +5,7 @@
  * patients by apply_med3pa_model.py, deployments by the Analysis Workspace page.
  */
 import { connectToMongoDB } from "../mongoDB/mongoDBUtils"
+import { MEDDataObject } from "../workspace/NewMedDataObject"
 
 const SESSIONS = "med3pa_sessions"
 const DEPLOYMENTS = "med3pa_deployments"
@@ -14,6 +15,26 @@ const PATIENTS = "med3pa_patients"
  * @description List saved MED3pa sessions (without the heavy result payloads)
  * @returns {Array} session summaries sorted by creation date (newest first)
  */
+/**
+ * @description Read a .medmodel's metadata.json.
+ *
+ * Every imported model records the target column and the ordered feature list
+ * it was declared with, so the configuration form does not have to ask the user
+ * to retype something the model already knows.
+ *
+ * @param {Object} globalData the MEDDataObject dictionary
+ * @param {String} modelId id of the .medmodel object
+ * @returns {Object|null} the metadata document, or null if there is none
+ */
+export async function getModelMetadata(globalData, modelId) {
+  if (!globalData || !modelId || !globalData[modelId]) return null
+  const metadataId = MEDDataObject.getChildIDWithName(globalData, modelId, "metadata.json")
+  if (!metadataId) return null
+  const db = await connectToMongoDB()
+  // The metadata is the single document of its own collection, named by child id.
+  return await db.collection(metadataId).findOne({}, { projection: { _id: 0 } })
+}
+
 export async function listSessions() {
   const db = await connectToMongoDB()
   return await db
