@@ -33,11 +33,15 @@ const WorkspaceFilePicker = ({ label, kind = "dataset", currentValue, onChange, 
   const acceptedExtensions = KIND_EXTENSIONS[kind] || KIND_EXTENSIONS.dataset
 
   // Build the list of selectable objects from the global data context
+  // This runs during render, so a throw here unmounts the whole app rather than
+  // showing an error -- and it runs again every time an import refreshes
+  // globalData. An object missing its type or name is therefore skipped, not
+  // dereferenced.
   const options = useMemo(() => {
     if (!globalData) return []
-    return Object.keys(globalData)
-      .filter((id) => acceptedExtensions.includes(globalData[id].type))
-      .map((id) => ({ label: globalData[id].name, value: id }))
+    return Object.values(globalData)
+      .filter((object) => object && acceptedExtensions.includes(object.type) && typeof object.name === "string")
+      .map((object) => ({ label: object.name, value: object.id }))
       .sort((a, b) => a.label.localeCompare(b.label))
   }, [globalData, kind])
 

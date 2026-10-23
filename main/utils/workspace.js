@@ -1,5 +1,5 @@
 import { app, dialog, ipcRenderer } from "electron"
-import MEDconfig from "../../medomics.dev"
+import MEDconfig, { APP_WORKSPACE_DIRS } from "../../medomics.dev"
 
 const fs = require("fs")
 var path = require("path")
@@ -195,8 +195,11 @@ function createFolder(folderString) {
  * its own port, and a workspace opened in both apps would have one overwrite the
  * other's config — and both would write into the same dbPath. Keeping a separate
  * directory lets the same folder be used by either app independently.
+ *
+ * Taken from medomics.dev so the renderer's workspace scan skips the same
+ * directory this creates; see APP_WORKSPACE_DIRS there.
  */
-export const APP_WORKSPACE_DIR = ".med3pa"
+export const APP_WORKSPACE_DIR = APP_WORKSPACE_DIRS[0]
 
 // Function to create the .med3pa directory and necessary files
 export const createMedomicsDirectory = (directoryPath) => {

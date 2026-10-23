@@ -1,6 +1,7 @@
 import { MEDDataObject } from "../../components/workspace/NewMedDataObject"
 import { randomUUID } from "crypto"
 import { insertMEDDataObjectIfNotExists } from "../../components/mongoDB/mongoDBUtils"
+import { APP_WORKSPACE_DIRS } from "../../../medomics.dev"
 
 // Import fs and path
 const fs = require("fs")
@@ -17,6 +18,13 @@ const path = require("path")
  */
 export async function recursivelyRecenseWorkspaceTree(children, parentID) {
   for (const child of children) {
+    // Skip the app's own plumbing entirely rather than only declining to recurse
+    // into it: these hold a live mongod data directory, so recensing them turned
+    // every workspace refresh into a walk over ~100 WiredTiger files, each one
+    // inserted as a MEDDataObject the user never asked for.
+    if (APP_WORKSPACE_DIRS.includes(child.name)) {
+      continue
+    }
     let isDirect = false
     // Check if the path exists
     if (fs.existsSync(child.path)) {
@@ -43,8 +51,20 @@ export async function recursivelyRecenseWorkspaceTree(children, parentID) {
       usedIn: null
     })
     // Real ID in DataBase if object already exists
-    const IDinDB = await insertMEDDataObjectIfNotExists(childObject, child.path)
-    if ((childType == "directory" || childType == "medmodel") && child.name != ".medomics") {
+    // One unreadable or malformed file must not abandon the rest of the scan:
+    // the caller uses the result to refresh globalData, so a throw here used to
+    // mean a freshly imported model never showed up at all.
+    let IDinDB
+    try {
+      IDinDB = await insertMEDDataObjectIfNotExists(childObject, child.path)
+    } catch (error) {
+      console.error(`Could not recense ${child.path}: `, error)
+      continue
+    }
+    // directory-tree only sets `children` on actual directories, so a plain file
+    // named `<something>.medmodel` is typed "medmodel" but has none -- recursing
+    // on it threw "children is not iterable" and took the whole refresh with it.
+    if ((childType == "directory" || childType == "medmodel") && Array.isArray(child.children)) {
       await recursivelyRecenseWorkspaceTree(child.children, IDinDB)
     }
   }

@@ -20,10 +20,12 @@ const DataAndModelsPanel = ({ visible, onHide }) => {
   const { globalData } = useContext(DataContext)
   const [tab, setTab] = useState("datasets")
 
+  // Runs during render, and this panel is what is open while a model is being
+  // imported -- so an object missing its type or name is skipped rather than
+  // dereferenced, which would throw and blank the app mid-import.
   const listByType = (types) =>
-    Object.keys(globalData || {})
-      .filter((id) => types.includes(globalData[id].type))
-      .map((id) => globalData[id])
+    Object.values(globalData || {})
+      .filter((object) => object && types.includes(object.type) && typeof object.name === "string")
       .sort((a, b) => a.name.localeCompare(b.name))
 
   const datasets = listByType(["csv"])
