@@ -648,9 +648,9 @@ export default function Med3paConfigForm({ onAnalysisComplete = null, onNextStep
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <div>
                 <label style={{ fontSize: 11, color: "#6C757D", display: "block", marginBottom: 2 }}>
-+                  max_depth
-+                  <Hint text={HINTS.gridMaxDepth} />
-+                </label>
+                  max_depth
+                  <Hint text={HINTS.gridMaxDepth} />
+                </label>
                 <input
                   type="text"
                   placeholder="e.g. 2, 3, 4, 5"
@@ -728,6 +728,7 @@ export default function Med3paConfigForm({ onAnalysisComplete = null, onNextStep
 
             <p style={{ fontSize: 12, fontWeight: 500, color: "#495057", margin: "6px 0 4px" }}>
               Grid-search ranges (comma-separated)
+              <Hint text={HINTS.apcGrid} />
             </p>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <div>
