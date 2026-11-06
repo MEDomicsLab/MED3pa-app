@@ -42,3 +42,4 @@ onnxruntime==1.28.0     # med_libs/model_loading.py, ONNX base models.
                         # Must stay >=1.18: earlier releases cap at ONNX IR
                         # version 9 and reject IR 10 models outright.
 joblib==1.5.3           # pickle/joblib base models
+requests==2.34.2        # med_libs/model_loading.py, remote base models
